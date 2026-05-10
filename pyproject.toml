@@ -11,6 +11,7 @@ dependencies = [
     "netmiko>=4.3",
     "openpyxl>=3.1",
     "customtkinter>=5.2",
+    "Pillow>=10.0",
 ]
 
 [project.scripts]
@@ -19,3 +20,6 @@ pint-live = "pint_live.ui.app:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["pint_live*"]
+
+[tool.setuptools.package-data]
+pint_live = ["ui/assets/*"]
