@@ -7,6 +7,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
+from pint_live.arp    import ArpTable
 from pint_live.models import ParsedSwitchData, InterfaceEntry
 
 
@@ -50,17 +51,31 @@ def _set_col_widths(ws, widths: list[int]) -> None:
 # Per-switch sheet
 # ---------------------------------------------------------------------------
 
-_INTF_HEADERS = ["Interface", "Link", "State", "Duplex", "Speed", "Untagged VLAN", "Tagged VLANs", "MAC (from table)", "Description"]
-_INTF_WIDTHS  = [14,          10,     12,      10,       10,      20,              32,              22,                  30]
-_NUM_COLS     = len(_INTF_HEADERS)
+_INTF_HEADERS_BASE = ["Interface", "Link", "State", "Duplex", "Speed", "Untagged VLAN", "Tagged VLANs", "MAC (from table)", "Description"]
+_INTF_WIDTHS_BASE  = [14,          10,     12,      10,       10,      20,              32,              22,                  30]
+_INTF_HEADERS_ARP  = ["IP (from ARP)", "Hostname (from ARP)"]
+_INTF_WIDTHS_ARP   = [22,              26]
 
 
-def _write_interfaces_sheet(wb: Workbook, data: ParsedSwitchData) -> None:
+def _write_interfaces_sheet(
+    wb: Workbook,
+    data: ParsedSwitchData,
+    arp_table: ArpTable | None = None,
+) -> None:
     tab_name = (data.hostname or data.host)[:31]  # Excel tab name limit
     ws = wb.create_sheet(title=tab_name)
 
+    if arp_table is not None:
+        # Insert IP / Hostname directly after the MAC column.
+        mac_idx  = _INTF_HEADERS_BASE.index("MAC (from table)")
+        headers  = _INTF_HEADERS_BASE[:mac_idx + 1] + _INTF_HEADERS_ARP + _INTF_HEADERS_BASE[mac_idx + 1:]
+        widths   = _INTF_WIDTHS_BASE[:mac_idx + 1]  + _INTF_WIDTHS_ARP  + _INTF_WIDTHS_BASE[mac_idx + 1:]
+    else:
+        headers, widths = _INTF_HEADERS_BASE, _INTF_WIDTHS_BASE
+    num_cols = len(headers)
+
     # --- Title row ---
-    col_span = f"A1:{get_column_letter(_NUM_COLS)}1"
+    col_span = f"A1:{get_column_letter(num_cols)}1"
     ws.merge_cells(col_span)
     title_cell = ws["A1"]
     title_cell.value = f"{data.model or 'Ruckus ICX'}  |  {data.hostname or data.host}  |  {data.host}  |  Polled: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
@@ -71,8 +86,8 @@ def _write_interfaces_sheet(wb: Workbook, data: ParsedSwitchData) -> None:
     ws.append([])  # blank row
 
     # --- Headers ---
-    ws.append(_INTF_HEADERS)
-    for col, header in enumerate(_INTF_HEADERS, start=1):
+    ws.append(headers)
+    for col, header in enumerate(headers, start=1):
         _header_style(ws.cell(row=3, column=col), header)
     ws.row_dimensions[3].height = 18
 
@@ -83,7 +98,8 @@ def _write_interfaces_sheet(wb: Workbook, data: ParsedSwitchData) -> None:
 
     # --- Data rows ---
     for intf in data.interfaces:
-        macs = ", ".join(port_macs.get(intf.port, []))
+        macs_list = port_macs.get(intf.port, [])
+        macs = ", ".join(macs_list)
         row = [
             intf.port,
             intf.link,
@@ -93,8 +109,13 @@ def _write_interfaces_sheet(wb: Workbook, data: ParsedSwitchData) -> None:
             intf.untagged_vlan,
             intf.tagged_vlans,
             macs,
-            intf.description,
         ]
+        if arp_table is not None:
+            ips       = arp_table.resolve_ips(macs_list)
+            hostnames = arp_table.resolve_hostnames(macs_list)
+            row.append(", ".join(ips))
+            row.append(", ".join(h for h in hostnames if h))
+        row.append(intf.description)
         ws.append(row)
         row_idx = ws.max_row
         fill = _link_fill(intf.link)
@@ -105,7 +126,7 @@ def _write_interfaces_sheet(wb: Workbook, data: ParsedSwitchData) -> None:
             cell.alignment = Alignment(vertical="center")
             cell.font = Font(size=10)
 
-    _set_col_widths(ws, _INTF_WIDTHS)
+    _set_col_widths(ws, widths)
     ws.freeze_panes = "A4"
 
 
@@ -154,14 +175,21 @@ def _write_summary_sheet(wb: Workbook, all_data: list[ParsedSwitchData]) -> None
 # Public entry point
 # ---------------------------------------------------------------------------
 
-def export(all_data: list[ParsedSwitchData], output_path: Path) -> Path:
-    """Write all parsed switch data to an Excel workbook and return the path."""
+def export(
+    all_data: list[ParsedSwitchData],
+    output_path: Path,
+    arp_table: ArpTable | None = None,
+) -> Path:
+    """Write all parsed switch data to an Excel workbook and return the path.
+
+    If `arp_table` is provided, each switch tab gains IP and Hostname columns
+    that map MACs from the switch's MAC table to entries in the ARP list."""
     wb = Workbook()
     wb.remove(wb.active)  # remove default empty sheet
 
     _write_summary_sheet(wb, all_data)
     for data in all_data:
-        _write_interfaces_sheet(wb, data)
+        _write_interfaces_sheet(wb, data, arp_table=arp_table)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     wb.save(output_path)

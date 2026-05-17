@@ -2,6 +2,11 @@
 
 *Currently still being built - useage is currently not recommeneded*
 
+> ⚠️ **Branch `claude/kind-jennings-2cb5c4` — testing pending.**
+> Adds an optional ARP list (.xlsx) feature: load IP / MAC / Hostname data and the
+> Excel export gains IP and Hostname columns per switch tab, resolved from the
+> port's MAC. Hardware testing against a real switch has not yet happened.
+
 
 ### Pi Network Tools — Live
 

@@ -8,12 +8,13 @@ per interface with link-state colour coding.
 
 import customtkinter as ctk
 
+from pint_live.arp    import ArpTable
 from pint_live.models import ParsedSwitchData
 from pint_live.ui import theme
 
 
 # Column definitions — label and pixel width
-_COLUMNS = [
+_COLUMNS_BASE = [
     ("Interface",     90),
     ("Link",          60),
     ("Speed",         60),
@@ -23,6 +24,12 @@ _COLUMNS = [
     ("MAC(s)",        160),
     ("Description",   180),
 ]
+_COLUMNS_ARP = [
+    ("IP (ARP)",       120),
+    ("Hostname (ARP)", 150),
+]
+# When an ARP table is loaded, IP/Hostname are inserted directly after MAC(s).
+_MAC_COL_IDX = next(i for i, (label, _) in enumerate(_COLUMNS_BASE) if label == "MAC(s)")
 
 
 class ResultsTable(ctk.CTkScrollableFrame):
@@ -38,9 +45,15 @@ class ResultsTable(ctk.CTkScrollableFrame):
     def __init__(self, master, **kwargs):
         kwargs.setdefault("fg_color", theme.PANEL_BG)
         super().__init__(master, **kwargs)
+        self._arp_table: ArpTable | None = None
         self._draw_column_headers()
 
     # ── Public interface ───────────────────────────────────────────────────
+
+    def set_arp_table(self, arp_table: ArpTable | None) -> None:
+        """Set/clear the ARP table used to add IP/Hostname columns. The table
+        only refreshes the next time `populate` is called."""
+        self._arp_table = arp_table
 
     def clear(self) -> None:
         """Remove all rows and redraw the column headers."""
@@ -55,13 +68,15 @@ class ResultsTable(ctk.CTkScrollableFrame):
 
         # Pre-build port → MAC lookup for each switch
         port_macs = _build_port_mac_index(all_data)
+        arp       = self._arp_table
 
         for switch in all_data:
             self._draw_switch_header(row_idx, switch)
             row_idx += 1
 
             for intf in switch.interfaces:
-                macs = ", ".join(port_macs[switch.host].get(intf.port, []))
+                macs_list = port_macs[switch.host].get(intf.port, [])
+                macs      = ", ".join(macs_list)
                 row_values = [
                     intf.port,
                     intf.link,
@@ -70,15 +85,30 @@ class ResultsTable(ctk.CTkScrollableFrame):
                     intf.untagged_vlan,
                     intf.tagged_vlans,
                     macs,
-                    intf.description,
                 ]
+                if arp is not None:
+                    ips       = arp.resolve_ips(macs_list)
+                    hostnames = arp.resolve_hostnames(macs_list)
+                    row_values.append(", ".join(ips))
+                    row_values.append(", ".join(h for h in hostnames if h))
+                row_values.append(intf.description)
+
                 self._draw_interface_row(row_idx, row_values, intf.link)
                 row_idx += 1
 
     # ── Private drawing helpers ────────────────────────────────────────────
 
+    def _columns(self) -> list[tuple[str, int]]:
+        if self._arp_table is None:
+            return _COLUMNS_BASE
+        return (
+            _COLUMNS_BASE[:_MAC_COL_IDX + 1]
+            + _COLUMNS_ARP
+            + _COLUMNS_BASE[_MAC_COL_IDX + 1:]
+        )
+
     def _draw_column_headers(self) -> None:
-        for col, (label, width) in enumerate(_COLUMNS):
+        for col, (label, width) in enumerate(self._columns()):
             ctk.CTkLabel(
                 self,
                 text=label,
@@ -104,7 +134,7 @@ class ResultsTable(ctk.CTkScrollableFrame):
             anchor="w",
         ).grid(
             row=row_idx, column=0,
-            columnspan=len(_COLUMNS),
+            columnspan=len(self._columns()),
             padx=4, pady=(10, 2), sticky="w",
         )
 
@@ -112,7 +142,7 @@ class ResultsTable(ctk.CTkScrollableFrame):
         """Draw one interface row with link-state colour coding on the Link cell."""
         text_colour = _link_colour(link)
 
-        for col, (value, (_, width)) in enumerate(zip(values, _COLUMNS)):
+        for col, (value, (_, width)) in enumerate(zip(values, self._columns())):
             # Only the Link column gets the link-state colour
             colour = text_colour if col == 1 else theme.TEXT_PRIMARY
             ctk.CTkLabel(

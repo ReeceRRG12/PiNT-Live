@@ -19,6 +19,7 @@ from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
+from pint_live.arp          import ArpTable, ArpLoadError, load_arp_xlsx
 from pint_live.core.session import Credentials, SwitchTarget, open_session, SessionError
 from pint_live.exporters    import excel as excel_exporter
 from pint_live.models       import ParsedSwitchData
@@ -62,6 +63,7 @@ class PintLiveApp(ctk.CTk):
 
         # App state
         self._poll_results: list[ParsedSwitchData] = []
+        self._arp_table: ArpTable | None = None
         self._msg_queue: queue.Queue = queue.Queue()
 
         self._build_layout()
@@ -83,6 +85,8 @@ class PintLiveApp(ctk.CTk):
         # Wire sidebar callbacks
         self._sidebar.on_poll_requested = self._start_poll
         self._sidebar.on_navigate       = self._navigate
+        self._sidebar.on_arp_load       = self._load_arp_file
+        self._sidebar.on_arp_clear      = self._clear_arp_table
 
         # ── Content area (right, fills remaining space) ────────────────────
         self._content = ctk.CTkFrame(self, fg_color=theme.BG, corner_radius=0)
@@ -242,11 +246,54 @@ class PintLiveApp(ctk.CTk):
             error_text = "\n".join(f"• {host}: {msg}" for host, msg in errors)
             messagebox.showerror("Connection Errors", f"Failed to connect to:\n\n{error_text}")
 
+    # ── ARP list ───────────────────────────────────────────────────────────
+
+    def _apply_arp_table(self, table: ArpTable | None) -> None:
+        """Push the current ARP table into widgets that render it."""
+        self._results_table.set_arp_table(table)
+        if self._poll_results:
+            self._results_table.populate(self._poll_results)
+
+    def _load_arp_file(self) -> ArpTable | None:
+        """Prompt for an ARP .xlsx, load it, update sidebar status, and
+        return the table (or None on cancel/failure)."""
+        path = filedialog.askopenfilename(
+            filetypes=[("Excel workbook", "*.xlsx")],
+            title="Load ARP List",
+        )
+        if not path:
+            return None
+        try:
+            table = load_arp_xlsx(Path(path))
+        except ArpLoadError as exc:
+            messagebox.showerror("ARP Load Failed", str(exc))
+            return None
+        if not table.entries:
+            messagebox.showwarning(
+                "ARP List Empty",
+                "No usable IP/MAC rows were found in that file.",
+            )
+            return None
+        self._arp_table = table
+        self._sidebar.set_arp_status(
+            f"{Path(path).name} — {len(table)} entries", loaded=True
+        )
+        self._apply_arp_table(table)
+        return table
+
+    def _clear_arp_table(self) -> None:
+        self._arp_table = None
+        self._sidebar.set_arp_status("No ARP list loaded.", loaded=False)
+        self._apply_arp_table(None)
+
     # ── Export ─────────────────────────────────────────────────────────────
 
     def _export(self) -> None:
         if not self._poll_results:
             return
+
+        arp_table = self._resolve_arp_for_export()
+
         stamp        = datetime.now().strftime("%Y%m%d_%H%M%S")
         default_name = f"pint_live_export_{stamp}.xlsx"
 
@@ -260,10 +307,45 @@ class PintLiveApp(ctk.CTk):
             return
 
         try:
-            saved = excel_exporter.export(self._poll_results, Path(path))
+            saved = excel_exporter.export(
+                self._poll_results, Path(path), arp_table=arp_table,
+            )
             messagebox.showinfo("Export Complete", f"Workbook saved:\n{saved}")
         except Exception as exc:
             messagebox.showerror("Export Failed", str(exc))
+
+    def _resolve_arp_for_export(self) -> ArpTable | None:
+        """Decide which ARP table (if any) to use for this export.
+
+        If one is already loaded, offer to keep it, swap it, or skip.
+        If none is loaded, offer to load one now or skip."""
+        if self._arp_table is not None:
+            name = (
+                self._arp_table.source_path.name
+                if self._arp_table.source_path else "loaded list"
+            )
+            choice = messagebox.askyesnocancel(
+                "ARP List",
+                f"Use the currently loaded ARP list ({name}, "
+                f"{len(self._arp_table)} entries) to add IP/Hostname columns?\n\n"
+                "Yes  → use the loaded list\n"
+                "No   → pick a different ARP file\n"
+                "Cancel → export without IP/Hostname columns",
+            )
+            if choice is None:
+                return None
+            if choice is True:
+                return self._arp_table
+            return self._load_arp_file() or self._arp_table
+
+        choice = messagebox.askyesno(
+            "ARP List",
+            "Load an ARP list (.xlsx) to add IP and Hostname columns "
+            "to each switch tab?",
+        )
+        if not choice:
+            return None
+        return self._load_arp_file()
 
 
 # ── Entry point ────────────────────────────────────────────────────────────

@@ -81,6 +81,8 @@ class Sidebar(ctk.CTkFrame):
         # Callbacks — assign these after construction
         self.on_poll_requested: callable = lambda cfg: None
         self.on_navigate:       callable = lambda key: None
+        self.on_arp_load:       callable = lambda: None
+        self.on_arp_clear:      callable = lambda: None
 
         # Internal state
         self._switch_rows: list[_SwitchRow] = []
@@ -110,6 +112,15 @@ class Sidebar(ctk.CTkFrame):
         """Set the progress bar (0.0 – 1.0)."""
         self._progress_bar.set(value)
 
+    def set_arp_status(self, text: str, *, loaded: bool) -> None:
+        """Update the ARP-list status line and show/hide the clear button."""
+        colour = theme.LINK_UP if loaded else theme.TEXT_MUTED
+        self._arp_label.configure(text=text, text_color=colour)
+        if loaded:
+            self._arp_clear_btn.pack(side="left", padx=(6, 0))
+        else:
+            self._arp_clear_btn.pack_forget()
+
     def set_nav_active(self, key: str) -> None:
         """Highlight the active navigation button."""
         for k, btn in self._nav_buttons.items():
@@ -132,6 +143,8 @@ class Sidebar(ctk.CTkFrame):
         self._add_vendor_section()
         theme.separator(self, pady=(6, 6))
         self._add_credentials_section()
+        theme.separator(self, pady=(6, 6))
+        self._add_arp_section()
         self._add_poll_button()
         self._add_status_area()
 
@@ -303,6 +316,52 @@ class Sidebar(ctk.CTkFrame):
             font=theme.font_body(11),
             text_color=theme.TEXT_MUTED,
         ).pack(anchor="w")
+
+    def _add_arp_section(self) -> None:
+        ctk.CTkLabel(
+            self,
+            text="ARP List (optional)",
+            fg_color="transparent",
+            text_color=theme.TEXT_MUTED,
+            font=theme.font_bold(11),
+            anchor="w",
+        ).pack(fill="x", padx=14)
+
+        row = ctk.CTkFrame(self, fg_color="transparent")
+        row.pack(fill="x", padx=14, pady=(4, 0))
+
+        ctk.CTkButton(
+            row,
+            text="Load ARP List…",
+            width=140, height=26,
+            font=theme.font_body(11),
+            fg_color=theme.NAV_INACTIVE_BG,
+            hover_color=theme.NAV_ACTIVE_BG,
+            command=lambda: self.on_arp_load(),
+        ).pack(side="left")
+
+        self._arp_clear_btn = ctk.CTkButton(
+            row,
+            text="Clear",
+            width=60, height=26,
+            font=theme.font_body(11),
+            fg_color=theme.REMOVE_BTN_BG,
+            hover_color=theme.REMOVE_BTN_HOVER,
+            command=lambda: self.on_arp_clear(),
+        )
+        # not packed until an ARP list is loaded
+
+        self._arp_label = ctk.CTkLabel(
+            self,
+            text="No ARP list loaded.",
+            fg_color="transparent",
+            text_color=theme.TEXT_MUTED,
+            font=theme.font_body(10),
+            anchor="w",
+            wraplength=theme.SIDEBAR_W - 28,
+            justify="left",
+        )
+        self._arp_label.pack(fill="x", padx=14, pady=(4, 0))
 
     def _add_poll_button(self) -> None:
         self._poll_btn = ctk.CTkButton(
