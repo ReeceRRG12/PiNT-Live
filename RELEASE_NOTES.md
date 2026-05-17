@@ -2,6 +2,51 @@
 
 ---
 
+## v0.3.0-rc1 — ARP Resolution (Pre-release · Hardware Testing Pending)
+
+> ⚠️ **Pre-release.** This build adds the ARP-resolution feature on top of v0.2.0. It has been unit-smoke-tested but **not yet validated against a real switch in a lab**. Use for testing only — `v0.2.0` remains the recommended stable build.
+
+### What's new in v0.3.0-rc1
+
+#### ARP list → Port → IP → Hostname
+- Load an ARP table from an Excel workbook (`.xlsx`) and PiNT Live will map every MAC seen on a switch port to its IP and (where available) its hostname
+- Flexible header detection — columns named `IP` / `IP Address`, `MAC` / `MAC Address`, and `Hostname` / `Host` / `Name` are all recognised (case-insensitive)
+- MAC normalisation handles every common format — colon (`AA:BB:CC:DD:EE:FF`), dotted (`AABB.CCDD.EEFF`), and dash (`AA-BB-CC-DD-EE-FF`) — so switch-table MACs and ARP-list MACs always compare equal
+- Ports with multiple MACs (uplinks, trunks) show comma-separated IPs and hostnames in MAC order; unmatched entries leave their slot blank so positions stay aligned
+
+#### Sidebar
+- New **ARP List (optional)** section with **Load ARP List…** and **Clear** buttons
+- Status line shows the loaded file name and entry count
+- On-screen results table refreshes immediately to show the new **IP (ARP)** and **Hostname (ARP)** columns when a list is loaded
+
+#### Export flow
+- When you click **Export to Excel**:
+  - If an ARP list is loaded → choose to use it, swap to a different file, or skip the ARP columns entirely
+  - If none is loaded → choose to load one now or skip
+- Each per-switch tab gains **IP (from ARP)** and **Hostname (from ARP)** columns inserted directly after the MAC column — colour-coding and the Summary tab are unchanged
+
+---
+
+### Architecture notes
+- New `pint_live/arp.py` module — single responsibility, no UI dependencies, easily unit-testable
+- `ArpTable` exposes `lookup` / `resolve_ips` / `resolve_hostnames` so any future exporter or UI panel can re-use the same logic
+- Excel exporter and on-screen results table both take an optional `arp_table` parameter — when `None`, output is identical to v0.2.0
+- Zero new runtime dependencies — uses `openpyxl`, already bundled
+
+---
+
+### Known limitations
+- Hardware testing against Ruckus / Cisco IOS / HP Aruba switches has not yet been completed for this build — please report any column-misalignment or matching issues
+- Only `.xlsx` ARP files are supported in this release; CSV / TSV input may be added in a follow-up if useful
+- The ARP list is held in memory only — it is not persisted between app launches
+
+---
+
+### Installation
+Download `PiNT Live.exe` from the pre-release assets and run it. No installer, no Python, no dependencies. Windows SmartScreen may flag the unsigned binary — click *More info → Run anyway*.
+
+---
+
 ## v0.2.0 — First Public Release
 
 ### What is PiNT Live?
