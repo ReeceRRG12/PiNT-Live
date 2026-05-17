@@ -2,6 +2,28 @@
 
 ---
 
+## v0.3.0-rc2 — Multi-file ARP Loading (Pre-release · Hardware Testing Pending)
+
+> ⚠️ **Pre-release.** Rolls up rc1 and adds multi-file ARP support. Hardware testing against a real switch is still pending — `v0.2.0` remains the recommended stable build.
+
+### What's new since rc1
+
+#### Load multiple ARP lists at once
+- The file picker now supports **multi-select** — hold Ctrl/Shift to pick one ARP file per VLAN/subnet in a single click
+- Each subsequent **Load ARP List(s)…** click is **additive** — appends to the loaded set instead of replacing it. Hit **Clear** to start over.
+- Sidebar status switches between single-file (`arp_vlan10.xlsx — 12 entries`) and multi-file (`4 files — 187 entries`) summaries automatically
+- Designed for the PiNT Desktop workflow: pull one ARP export per VLAN, then drop them all into PiNT Live
+
+#### Smart merge across ARP sources
+- Duplicate MACs across files are deduplicated automatically (last-write-wins on IP)
+- **Hostnames are preserved** — a blank hostname in a later file will never overwrite a populated one from an earlier file. Useful when ARP sources vary (DHCP server vs. router ARP cache)
+- One bad file no longer kills the whole load — failures are reported per-file and the rest continue to load
+
+#### Updated export prompt
+- When ARP data is already loaded, the export dialog now offers **"load more first"** instead of the previous "swap" — matching the new additive model
+
+---
+
 ## v0.3.0-rc1 — ARP Resolution (Pre-release · Hardware Testing Pending)
 
 > ⚠️ **Pre-release.** This build adds the ARP-resolution feature on top of v0.2.0. It has been unit-smoke-tested but **not yet validated against a real switch in a lab**. Use for testing only — `v0.2.0` remains the recommended stable build.

@@ -63,18 +63,39 @@ class ArpEntry:
 
 @dataclass
 class ArpTable:
-    source_path: Path | None = None
+    source_paths: list[Path] = field(default_factory=list)
     entries: list[ArpEntry] = field(default_factory=list)
     _by_mac: dict[str, ArpEntry] = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
-        # Last write wins if the file has duplicate MACs.
+        # Last write wins if a file has duplicate MACs.
         for entry in self.entries:
             if entry.mac:
                 self._by_mac[entry.mac] = entry
 
     def __len__(self) -> int:
         return len(self.entries)
+
+    @property
+    def file_count(self) -> int:
+        return len(self.source_paths)
+
+    def extend(self, other: "ArpTable") -> None:
+        """Merge another ArpTable into this one. Later entries overwrite
+        earlier ones on MAC collision, but a blank hostname never overwrites
+        a populated one — handy when ARP sources vary in hostname coverage."""
+        for entry in other.entries:
+            if not entry.mac:
+                continue
+            existing = self._by_mac.get(entry.mac)
+            if existing is not None and not entry.hostname and existing.hostname:
+                # New entry would erase the hostname — keep the populated one,
+                # but adopt the newer IP in case it's been re-assigned.
+                existing.ip = entry.ip
+                continue
+            self._by_mac[entry.mac] = entry
+            self.entries.append(entry)
+        self.source_paths.extend(other.source_paths)
 
     def lookup(self, mac: str) -> ArpEntry | None:
         return self._by_mac.get(normalise_mac(mac))
@@ -148,7 +169,24 @@ def load_arp_xlsx(path: Path) -> ArpTable:
         entries.append(ArpEntry(ip=ip, mac=mac, hostname=hostname))
 
     wb.close()
-    return ArpTable(source_path=Path(path), entries=entries)
+    return ArpTable(source_paths=[Path(path)], entries=entries)
+
+
+def load_arp_xlsx_many(paths) -> tuple[ArpTable, list[tuple[Path, str]]]:
+    """Load and merge multiple ARP workbooks. Returns the merged ArpTable
+    and a list of (path, error_message) for any files that failed to load.
+    A single bad file does not stop the others from being loaded."""
+    merged = ArpTable()
+    errors: list[tuple[Path, str]] = []
+    for raw_path in paths:
+        path = Path(raw_path)
+        try:
+            table = load_arp_xlsx(path)
+        except ArpLoadError as exc:
+            errors.append((path, str(exc)))
+            continue
+        merged.extend(table)
+    return merged, errors
 
 
 def _cell_str(row, idx: int) -> str:

@@ -320,7 +320,7 @@ class Sidebar(ctk.CTkFrame):
     def _add_arp_section(self) -> None:
         ctk.CTkLabel(
             self,
-            text="ARP List (optional)",
+            text="ARP Lists (optional)",
             fg_color="transparent",
             text_color=theme.TEXT_MUTED,
             font=theme.font_bold(11),
@@ -332,7 +332,7 @@ class Sidebar(ctk.CTkFrame):
 
         ctk.CTkButton(
             row,
-            text="Load ARP List…",
+            text="Load ARP List(s)…",
             width=140, height=26,
             font=theme.font_body(11),
             fg_color=theme.NAV_INACTIVE_BG,
@@ -353,7 +353,7 @@ class Sidebar(ctk.CTkFrame):
 
         self._arp_label = ctk.CTkLabel(
             self,
-            text="No ARP list loaded.",
+            text="No ARP lists loaded.",
             fg_color="transparent",
             text_color=theme.TEXT_MUTED,
             font=theme.font_body(10),
