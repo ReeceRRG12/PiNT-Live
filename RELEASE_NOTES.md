@@ -2,6 +2,49 @@
 
 ---
 
+## v0.4.0 — Multi-Vendor Polling
+
+Each switch in your polling list can now be set to its own vendor, so you can poll a mixed Ruckus / Cisco / HP-Aruba site in a single run. Credentials can be shared across the whole site (the common case) or overridden per switch.
+
+### What's new in v0.4.0
+
+#### Per-switch vendor selection
+- Every switch row in the sidebar now has its own **⚙ cog button**
+- Clicking the cog opens a per-switch popup where you pick the vendor (Ruckus / Cisco IOS / HP-Aruba) and — if you've turned shared credentials off — set per-switch username/password overrides
+- The status line during polling now shows which vendor is being talked to: `Connecting to 192.168.1.1 (Ruckus)…`
+
+#### Bulk configuration modal
+- New **Configure all switches…** button below the IP list opens a modal with:
+  - **Shared credentials** at the top — used by every switch unless overridden
+  - A **per-switch table** with IP / Vendor / Username / Password columns
+  - **Use same credentials for all switches** checkbox — when checked, per-row cred fields are greyed out
+- Designed for the two common cases: (a) one cred set, mixed vendors, and (b) different creds per switch
+
+#### Duplicate-IP guard
+- If the same IP/host appears more than once in the list, the poll now flags it with a Yes/No warning before running. Avoids accidental double-polling and duplicate sheets in the export.
+- Case-insensitive comparison, defaults to **No** so an accidental Enter doesn't push through.
+
+#### Sidebar layout cleanup
+- The old global Vendor and Username/Password sections are gone — that state now lives on the bulk modal (shared) or each row (per-switch)
+- Sidebar is noticeably less busy as a result
+
+### Behaviour preserved from v0.3.x
+- Optional **ARP list (.xlsx)** loading and per-port IP/Hostname enrichment in the Excel export — unchanged
+- Excel export Summary tab and per-switch colour-coded tabs — unchanged
+- Protocol toggle (SSH / Telnet with security warning) — unchanged
+
+### Architecture notes
+- `_SwitchRow` now owns its own `vendor` / `username` / `password` state
+- The sidebar emits a per-switch job list — `{host, vendor, username, password}` — instead of one shared vendor for all hosts
+- `_start_poll` resolves device_type / collector / parser per switch, so the worker thread is vendor-agnostic
+- `theme.font_symbol()` helper added — uses **Segoe UI Symbol** so the ⚙ glyph renders as an actual gear on Windows
+
+### Known limitations
+- Cisco IOS and HP/Aruba parsers are still awaiting validation against real gear
+- Scheduled / unattended polling is on the v0.5 roadmap (see README)
+
+---
+
 ## v0.3.0-rc2 — Multi-file ARP Loading (Pre-release · Hardware Testing Pending)
 
 > ⚠️ **Pre-release.** Rolls up rc1 and adds multi-file ARP support. Hardware testing against a real switch is still pending — `v0.2.0` remains the recommended stable build.

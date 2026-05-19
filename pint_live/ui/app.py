@@ -131,11 +131,10 @@ class PintLiveApp(ctk.CTk):
     def _start_poll(self, config: dict) -> None:
         """
         Called by the sidebar when the user clicks Poll Switches.
-        Validates the vendor selection, locks the UI, and fires the worker thread.
+        Each switch carries its own vendor and resolved credentials, so
+        we resolve device_type/collector/parser per switch here.
         """
-        vendor_name = config["vendor"]
-        vendor_cfg  = VENDORS[vendor_name]
-        protocol    = config["protocol"]
+        protocol = config["protocol"]
 
         self._sidebar.set_busy(True)
         self._sidebar.set_progress(0)
@@ -145,49 +144,58 @@ class PintLiveApp(ctk.CTk):
         self._poll_results = []
         self._navigate("poll")
 
-        device_type = (
-            vendor_cfg["device_type_telnet"]
-            if protocol == "Telnet"
-            else vendor_cfg["device_type_ssh"]
-        )
-        creds = Credentials(
-            username=config["username"],
-            password=config["password"],
-        )
+        # Build a per-switch job list the worker can iterate over without
+        # needing access to the vendor registry itself.
+        jobs = []
+        for sw in config["switches"]:
+            vendor_cfg = VENDORS[sw["vendor"]]
+            device_type = (
+                vendor_cfg["device_type_telnet"]
+                if protocol == "Telnet"
+                else vendor_cfg["device_type_ssh"]
+            )
+            jobs.append({
+                "host":        sw["host"],
+                "vendor":      sw["vendor"],
+                "device_type": device_type,
+                "collector":   vendor_cfg["collector"],
+                "parser":      vendor_cfg["parser"],
+                "credentials": Credentials(
+                    username=sw["username"],
+                    password=sw["password"],
+                ),
+            })
 
         thread = threading.Thread(
             target=self._poll_worker,
-            args=(config["hosts"], creds, device_type,
-                  vendor_cfg["collector"], vendor_cfg["parser"]),
+            args=(jobs,),
             daemon=True,
         )
         thread.start()
 
-    def _poll_worker(
-        self,
-        hosts: list[str],
-        creds: Credentials,
-        device_type: str,
-        collector,
-        parser,
-    ) -> None:
+    def _poll_worker(self, jobs: list[dict]) -> None:
         """
         Runs in a background thread — never touches the GUI directly.
         Posts messages to _msg_queue for the main thread to consume.
         """
         results = []
         errors  = []
-        total   = len(hosts)
+        total   = len(jobs)
 
-        for idx, host in enumerate(hosts):
-            self._msg_queue.put(("status", f"Connecting to {host}…", theme.ACCENT))
-            target = SwitchTarget(host=host, credentials=creds)
+        for idx, job in enumerate(jobs):
+            host = job["host"]
+            self._msg_queue.put((
+                "status",
+                f"Connecting to {host} ({job['vendor']})…",
+                theme.ACCENT,
+            ))
+            target = SwitchTarget(host=host, credentials=job["credentials"])
             try:
-                connection = open_session(target, device_type=device_type)
+                connection = open_session(target, device_type=job["device_type"])
                 self._msg_queue.put(("status", f"Collecting data from {host}…", theme.ACCENT))
-                raw    = collector.collect(connection, host)
+                raw    = job["collector"].collect(connection, host)
                 connection.disconnect()
-                parsed = parser.parse(raw)
+                parsed = job["parser"].parse(raw)
                 results.append(parsed)
                 up    = sum(1 for i in parsed.interfaces if i.link.lower() == "up")
                 total_ports = len(parsed.interfaces)

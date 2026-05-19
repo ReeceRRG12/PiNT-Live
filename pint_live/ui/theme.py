@@ -77,6 +77,11 @@ def font_small(size: int = 10) -> ctk.CTkFont:
 def font_link(size: int = 12) -> ctk.CTkFont:
     return ctk.CTkFont("Arial", size, underline=True)
 
+def font_symbol(size: int = 15) -> ctk.CTkFont:
+    # Windows ships Segoe UI Symbol; renders glyphs like ⚙ properly,
+    # unlike Arial which falls back to a thin outline.
+    return ctk.CTkFont("Segoe UI Symbol", size)
+
 
 # ── Separator helper ───────────────────────────────────────────────────────
 
