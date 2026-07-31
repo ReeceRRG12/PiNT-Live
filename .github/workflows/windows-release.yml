@@ -1,0 +1,79 @@
+name: Build Windows Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to build
+        required: true
+        default: v0.5.0
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install application and build tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install . "pyinstaller>=6.10,<7"
+
+      - name: Run automated tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Build standalone executable
+        run: python -m PyInstaller --clean --noconfirm PiNT_Live.spec
+
+      - name: Prepare versioned release files
+        shell: pwsh
+        run: |
+          $asset = "PiNT-Live-$env:RELEASE_TAG-Windows.exe"
+          $checksum = "PiNT-Live-$env:RELEASE_TAG-Windows.sha256.txt"
+          Copy-Item "dist/PiNT Live.exe" "dist/$asset"
+          $hash = (Get-FileHash "dist/$asset" -Algorithm SHA256).Hash.ToLower()
+          "$hash  $asset" | Set-Content "dist/$checksum" -Encoding ascii
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PiNT-Live-${{ env.RELEASE_TAG }}-Windows
+          path: |
+            dist/PiNT-Live-${{ env.RELEASE_TAG }}-Windows.exe
+            dist/PiNT-Live-${{ env.RELEASE_TAG }}-Windows.sha256.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Create or update GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$env:RELEASE_TAG" *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create "$env:RELEASE_TAG" `
+              --title "PiNT Live $env:RELEASE_TAG" `
+              --generate-notes
+          }
+          gh release upload "$env:RELEASE_TAG" `
+            "dist/PiNT-Live-$env:RELEASE_TAG-Windows.exe" `
+            "dist/PiNT-Live-$env:RELEASE_TAG-Windows.sha256.txt" `
+            --clobber
