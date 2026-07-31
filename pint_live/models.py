@@ -32,6 +32,23 @@ class VlanEntry:
     name: str
     tagged_ports: list[str] = field(default_factory=list)
     untagged_ports: list[str] = field(default_factory=list)
+    tagged_lags: list[str] = field(default_factory=list)
+    untagged_lags: list[str] = field(default_factory=list)
+
+
+@dataclass
+class LagEntry:
+    lag_id: str
+    name: str = ""
+    mode: str = ""
+    deployed: bool = False
+    interface: str = ""
+    trunk_type: str = ""
+    lacp_key: str = ""
+    members: list[str] = field(default_factory=list)
+    member_states: dict[str, str] = field(default_factory=dict)
+    untagged_vlan: str = ""
+    tagged_vlans: str = ""
 
 
 @dataclass
@@ -43,3 +60,5 @@ class ParsedSwitchData:
     interfaces: list[InterfaceEntry] = field(default_factory=list)
     mac_table: list[MacEntry] = field(default_factory=list)
     vlans: list[VlanEntry] = field(default_factory=list)
+    lags: list[LagEntry] = field(default_factory=list)
+    raw_outputs: dict[str, str] = field(default_factory=dict)

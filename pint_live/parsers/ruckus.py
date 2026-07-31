@@ -3,7 +3,7 @@
 import re
 from typing import Optional
 
-from pint_live.models import InterfaceEntry, MacEntry, VlanEntry, ParsedSwitchData
+from pint_live.models import InterfaceEntry, LagEntry, MacEntry, VlanEntry, ParsedSwitchData
 
 
 # ---------------------------------------------------------------------------
@@ -111,7 +111,14 @@ def _parse_mac_table(output: str, data: ParsedSwitchData) -> None:
 # !
 
 _VLAN_HDR_RE  = re.compile(r"^vlan\s+(\d+)(?:\s+name\s+(\S+))?", re.IGNORECASE)
-_PORT_LIST_RE = re.compile(r"(?:ethe\s+)?(\d+/\d+/\d+)(?:\s+to\s+(\d+/\d+/\d+))?", re.IGNORECASE)
+_PORT_LIST_RE = re.compile(r"(?:e(?:the)?\s+)?(\d+/\d+/\d+)(?:\s+to\s+(\d+/\d+/\d+))?", re.IGNORECASE)
+_HOSTNAME_RE  = re.compile(r'^hostname\s+["\']?(.+?)["\']?$', re.IGNORECASE)
+_LAG_SHOW_HDR_RE = re.compile(
+    r'^===\s+LAG\s+"([^"]+)"\s+ID\s+(\d+)\s+\((\S+)\s+(\S+)\)\s+===',
+    re.IGNORECASE,
+)
+_LAG_CFG_HDR_RE = re.compile(r"^lag\s+(.+?)\s+(dynamic|static)\s+id\s+(\d+)$", re.IGNORECASE)
+_LAG_REF_RE = re.compile(r"\blag\s+(\d+)(?:\s+to\s+(\d+))?", re.IGNORECASE)
 
 
 def _expand_port_range(start: str, end: Optional[str]) -> list[str]:
@@ -135,11 +142,92 @@ def _parse_port_list(line: str) -> list[str]:
     return ports
 
 
+def _expand_lag_list(line: str) -> list[str]:
+    """Extract LAG IDs from text such as 'lag 1 to 2 lag 6 lag 9 to 11'."""
+    lag_ids = []
+    for match in _LAG_REF_RE.finditer(line):
+        start = int(match.group(1))
+        end = int(match.group(2) or start)
+        lag_ids.extend(str(lag_id) for lag_id in range(start, end + 1))
+    return lag_ids
+
+
+def _parse_lag_output(output: str, data: ParsedSwitchData) -> None:
+    """Parse operational LAG details from ``show lag``."""
+    current: Optional[LagEntry] = None
+    reading_member_table = False
+
+    for line in output.splitlines():
+        stripped = line.strip().lstrip("- ").strip()
+        header = _LAG_SHOW_HDR_RE.match(stripped)
+        if header:
+            current = LagEntry(
+                lag_id=header.group(2),
+                name=header.group(1),
+                mode=header.group(3).capitalize(),
+                deployed=header.group(4).lower() == "deployed",
+            )
+            data.lags.append(current)
+            reading_member_table = False
+            continue
+        if current is None:
+            continue
+        if stripped.startswith("Ports:"):
+            current.members = _parse_port_list(stripped.split(":", 1)[1])
+        elif stripped.startswith("Lag Interface:"):
+            current.interface = stripped.split(":", 1)[1].strip()
+        elif stripped.startswith("Trunk Type:"):
+            current.trunk_type = stripped.split(":", 1)[1].strip()
+        elif stripped.startswith("LACP Key:"):
+            current.lacp_key = stripped.split(":", 1)[1].strip()
+        elif stripped.startswith("Port") and "Link" in stripped and "State" in stripped:
+            reading_member_table = True
+        elif stripped.startswith("Port") and "[Sys P]" in stripped:
+            reading_member_table = False
+        elif reading_member_table:
+            member = re.match(r"^(\d+/\d+/\d+)\s+(Up|Down)\b", stripped, re.IGNORECASE)
+            if member:
+                current.member_states[member.group(1)] = member.group(2).capitalize()
+
+
+def _parse_lag_config(output: str, data: ParsedSwitchData) -> None:
+    """Backfill configured LAG names/members when operational output is absent."""
+    lag_map = {lag.lag_id: lag for lag in data.lags}
+    current: Optional[LagEntry] = None
+    for line in output.splitlines():
+        stripped = line.strip().lstrip("- ").strip()
+        header = _LAG_CFG_HDR_RE.match(stripped)
+        if header:
+            lag_id = header.group(3)
+            current = lag_map.get(lag_id)
+            if current is None:
+                current = LagEntry(lag_id=lag_id)
+                data.lags.append(current)
+                lag_map[lag_id] = current
+            current.name = current.name or header.group(1).strip('"')
+            current.mode = current.mode or header.group(2).capitalize()
+            continue
+        if stripped == "!":
+            current = None
+            continue
+        if current is not None and stripped.startswith("ports "):
+            members = _parse_port_list(stripped[6:])
+            if members:
+                current.members = members
+
+
 def _parse_running_config(output: str, data: ParsedSwitchData) -> None:
     current_vlan: Optional[VlanEntry] = None
 
     for line in output.splitlines():
         stripped = line.strip()
+
+        # Some FastIron versions omit "System Name" from show version but
+        # include the configured hostname in show running-config.
+        if not data.hostname:
+            hostname_match = _HOSTNAME_RE.match(stripped)
+            if hostname_match:
+                data.hostname = hostname_match.group(1).strip()
 
         vlan_match = _VLAN_HDR_RE.match(stripped)
         if vlan_match:
@@ -163,8 +251,10 @@ def _parse_running_config(output: str, data: ParsedSwitchData) -> None:
 
         if stripped.lower().startswith("tagged"):
             current_vlan.tagged_ports.extend(_parse_port_list(stripped))
+            current_vlan.tagged_lags.extend(_expand_lag_list(stripped))
         elif stripped.lower().startswith("untagged"):
             current_vlan.untagged_ports.extend(_parse_port_list(stripped))
+            current_vlan.untagged_lags.extend(_expand_lag_list(stripped))
 
 
 def _enrich_interfaces_with_vlans(data: ParsedSwitchData) -> None:
@@ -187,6 +277,21 @@ def _enrich_interfaces_with_vlans(data: ParsedSwitchData) -> None:
         intf.tagged_vlans  = ", ".join(trunk)
 
 
+def _enrich_lags_with_vlans(data: ParsedSwitchData) -> None:
+    lag_map = {lag.lag_id: lag for lag in data.lags}
+    tagged: dict[str, list[str]] = {}
+    for vlan in data.vlans:
+        label = f"{vlan.vlan_id}" + (f" ({vlan.name})" if vlan.name else "")
+        for lag_id in vlan.untagged_lags:
+            if lag_id in lag_map:
+                lag_map[lag_id].untagged_vlan = label
+        for lag_id in vlan.tagged_lags:
+            if lag_id in lag_map:
+                tagged.setdefault(lag_id, []).append(label)
+    for lag_id, labels in tagged.items():
+        lag_map[lag_id].tagged_vlans = ", ".join(labels)
+
+
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
@@ -197,6 +302,16 @@ def parse(raw) -> ParsedSwitchData:
     _parse_version(raw.version_output, data)
     _parse_interfaces(raw.interfaces_output, data)
     _parse_mac_table(raw.mac_table_output, data)
+    _parse_lag_output(getattr(raw, "lag_output", ""), data)
+    _parse_lag_config(raw.running_config_output, data)
     _parse_running_config(raw.running_config_output, data)
     _enrich_interfaces_with_vlans(data)
+    _enrich_lags_with_vlans(data)
+    data.raw_outputs = {
+        "show version": raw.version_output,
+        "show interfaces brief": raw.interfaces_output,
+        "show mac-address": raw.mac_table_output,
+        "show lag": getattr(raw, "lag_output", ""),
+        "show running-config": raw.running_config_output,
+    }
     return data

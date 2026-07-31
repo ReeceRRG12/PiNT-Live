@@ -2,6 +2,54 @@
 
 ---
 
+## v0.5.0 — Reliability, LAG Discovery, and Navigable Exports
+
+Released 31 July 2026.
+
+This release hardens multi-switch polling for real client-site use, adds Ruckus LAG visibility, scales the desktop results view to larger sites, and turns the Excel workbook into a linked navigation hub.
+
+### Reliable polling
+- A failure on one switch no longer terminates the entire polling thread or leaves the interface permanently busy
+- Transient Netmiko read timeouts receive one retry using a fresh connection
+- SSH sessions are closed in all success and failure paths
+- Unexpected command and parser errors are reported per switch while remaining switches continue
+- Empty/unrecognised interface output is treated as an error instead of a blank success
+- New **Stop** button cooperatively stops between commands or switches and preserves completed results
+
+### FastIron 09.x compatibility
+- Ruckus commands use timing-based reads to avoid prompt-detection failures observed on FastIron `09.0.10h` after `skip-page-display`
+- Ruckus hostname parsing falls back to `hostname ...` in the running configuration when `show version` omits `System Name`
+
+### Ruckus LAG discovery
+- Collects `show lag` in addition to the existing Ruckus command set
+- Parses LAG ID, name, mode, deployment state, interface, trunk type, LACP key, physical members, and member link health
+- Resolves `tagged lag` / `untagged lag` configuration, including ranges such as `lag 6 to 17`
+- Adds a dedicated LAG worksheet per Ruckus switch with member and VLAN details
+
+### Excel improvements
+- Summary rows now link to each switch's **Main**, **RAW**, and **LAG** worksheets
+- Every detail worksheet includes a **Back to Summary** link in cell A1
+- Optional raw CLI worksheets provide command names, line numbers, and one output line per row
+- Raw output remains disabled by default and displays a sensitive-data warning when enabled
+- Raw text is forced to Excel string cells to prevent device output beginning with `=` from becoming a formula
+
+### Desktop UI improvements
+- Replaced the cell-per-widget results grid with one lightweight native table, eliminating long post-poll hangs on larger sites
+- Added horizontal and vertical results scrolling with expandable switch groups
+- Made the complete left sidebar scrollable so Poll, Stop, and export options remain reachable with long switch lists
+
+### Validation
+- Ruckus and HP/Aruba polling validated against lab hardware, including mixed-vendor polling over a VPN
+- Ruckus FastIron `09.0.10h` and `10.0.10g` behaviours exercised during development
+- Automated coverage added for timeout retry, error isolation, cleanup, cancellation, parser validation, Ruckus hostname/LAG parsing, raw export safety, and Excel navigation links
+
+### Known limitations
+- Stop waits for the active Netmiko command to return or time out; it does not forcibly terminate a socket from the GUI thread
+- Cisco IOS / IOS-XE parsing remains awaiting validation against real hardware
+- Raw-output workbooks may contain sensitive client configuration and must be protected accordingly
+
+---
+
 ## v0.4.0 — Multi-Vendor Polling
 
 Each switch in your polling list can now be set to its own vendor, so you can poll a mixed Ruckus / Cisco / HP-Aruba site in a single run. Credentials can be shared across the whole site (the common case) or overridden per switch.
