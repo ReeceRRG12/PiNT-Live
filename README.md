@@ -19,21 +19,45 @@ PiNT Live fixes that. Provide it with a list of switch IPs and credentials, poin
 - **Multi-switch polling** — provide a list of IPs and credentials, PiNT Live connects to each one automatically over SSH (or Telnet, with a warning)
 - **Mixed-vendor polling in one run** — each switch can be set to **Ruckus**, **Cisco IOS / IOS-XE**, or **HP/Aruba ProCurve** independently, with the correct command set used for each
 - **Per-switch or shared credentials** — use one username/password for the whole site, or override per switch via the **Configure all switches…** modal
-- **Live data collection** — pulls `show version`, `show interface brief`, `show mac address-table`, and `show running-config`
+- **Resilient site polling** — a failed switch is recorded without breaking the chain; transient read timeouts receive one clean reconnect/retry, and every session is closed reliably
+- **Stop control** — cooperatively stop between commands or switches while preserving completed results
+- **Live data collection** — collects version/system, interface, MAC-table, running configuration, and Ruckus LAG information using vendor-appropriate commands
+- **Ruckus LAG visibility** — maps LAG names and IDs to physical members, member health, and tagged/untagged VLANs
 - **Optional ARP enrichment** — load one or more ARP exports (.xlsx) and PiNT Live maps every port's MAC to its IP and hostname
-- **Structured Excel export** — per-switch tabs, port state colour coding (🟢 up / 🔴 down / ⚫ admin down), VLANs (untagged + tagged), MACs, and ARP-resolved IP/Hostname columns when available
+- **Structured Excel export** — Summary, per-switch, and Ruckus LAG sheets with port-state colour coding, VLANs, MACs, and optional ARP-resolved IP/Hostname columns
+- **Workbook navigation** — Summary links open each switch's Main, RAW, and LAG sheets; every detail sheet links back to Summary
+- **Optional raw-output sheets** — include searchable, line-numbered CLI output when needed, with an explicit sensitive-data warning
+- **Large-site UI performance** — a lightweight results table handles site-sized polls without creating thousands of individual GUI widgets
+- **Scrollable sidebar** — all controls remain reachable when many switches are added
 - **Clean, readable output** — built for sharing with teams and clients, not just engineers
+
+---
+
+## ▶️ Run from source
+
+PiNT Live requires Python 3.10 or newer. From the project directory:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e .
+pint-live
+```
+
+On Windows, activate the environment with `.venv\Scripts\activate` instead.
+
+On later launches, activate the existing environment and run `pint-live` again.
 
 ---
 
 ## 🗺️ Roadmap
 
-### v0.5 — Automation / Scheduled Logging
+### Next — Automation / Scheduled Logging
 - Run polls on a schedule (every N hours / cron) and auto-export to a configured directory
 - Headless CLI mode so a server can keep a rolling log of network state for forensics
 - Time-series friendly output (CSV/SQLite append) to make diffing across snapshots tractable
 
-### Beyond v0.5 — Push/Pull (Desired-State Management)
+### Future — Push/Pull (Desired-State Management)
 - Use the exported Excel sheet as a source of truth
 - PiNT Live diffs the spreadsheet against live switch state and pushes only the delta
 - Dry-run / preview mode before any changes are committed
@@ -55,7 +79,9 @@ PiNT Live fixes that. Provide it with a list of switch IPs and credentials, poin
 
 ## 🔒 Security
 
-Credential security is a first-class concern in PiNT Live. Passwords are never stored in plaintext config files or spreadsheets. The project will use OS-level secure storage (`keyring`) or encrypted credential vaults, with environment variable support for CI/automated use cases.
+Credentials are held in application memory for the polling session and are not written to project files or Excel exports. Telnet is supported with an explicit warning, but SSH is strongly recommended.
+
+Optional raw-output worksheets can contain the complete running configuration, including password hashes, SNMP communities, usernames, management addresses, and other sensitive client data. They are disabled by default and should be handled as confidential when enabled.
 
 ---
 
@@ -66,16 +92,15 @@ pint-live/
 ├── core/           # SSH connections, session management
 ├── collectors/     # Per-vendor command sets and data collection
 ├── parsers/        # TextFSM / NAPALM output parsing
-├── exporters/      # Excel, CSV, and future format support
-├── ui/             # Interface (CLI initially, GUI planned)
-└── docs/           # Documentation and usage guides
+├── exporters/      # Excel workbook generation
+└── ui/             # Desktop GUI and reusable interface components
 ```
 
 ---
 
 ## 🚧 Status
 
-**v0.4.0** — multi-vendor polling shipped. Ruckus is hardware-tested; Cisco IOS and HP/Aruba parsers are implemented and awaiting validation against real gear. See [RELEASE_NOTES.md](RELEASE_NOTES.md) for full change history.
+**v0.5.0** — resilient polling, scalable results rendering, Ruckus LAG discovery, optional raw-output worksheets, and navigable Excel workbooks. Ruckus and HP/Aruba have been validated against lab hardware; Cisco IOS / IOS-XE remains implemented but awaits hardware validation. See [RELEASE_NOTES.md](RELEASE_NOTES.md) for full change history.
 
 ---
 

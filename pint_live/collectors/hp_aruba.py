@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 from typing import Optional
 
+from pint_live.core.polling import PollCancelled
+
 
 @dataclass
 class RawSwitchData:
@@ -14,7 +16,7 @@ class RawSwitchData:
     error: Optional[str] = None
 
 
-def collect(connection, host: str) -> RawSwitchData:
+def collect(connection, host: str, stop_requested=lambda: False) -> RawSwitchData:
     """
     Run collection commands against an open Netmiko session.
     Returns RawSwitchData containing raw CLI output for each command.
@@ -29,6 +31,8 @@ def collect(connection, host: str) -> RawSwitchData:
     }
 
     for attr, cmd in commands.items():
+        if stop_requested():
+            raise PollCancelled()
         output = connection.send_command(cmd, read_timeout=120)
         setattr(data, attr, output)
 

@@ -246,4 +246,10 @@ def parse(raw) -> ParsedSwitchData:
     _parse_interfaces(raw.interfaces_output, data)
     _parse_mac_table(raw.mac_table_output, data)
     _parse_running_config(raw.running_config_output, data)
+    data.raw_outputs = {
+        "show version": raw.version_output,
+        "show interfaces status": raw.interfaces_output,
+        "show mac address-table": raw.mac_table_output,
+        "show running-config": raw.running_config_output,
+    }
     return data

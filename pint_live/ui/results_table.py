@@ -6,6 +6,8 @@ Each switch gets a coloured section header, followed by one row
 per interface with link-state colour coding.
 """
 
+from tkinter import ttk
+
 import customtkinter as ctk
 
 from pint_live.arp    import ArpTable
@@ -32,9 +34,13 @@ _COLUMNS_ARP = [
 _MAC_COL_IDX = next(i for i, (label, _) in enumerate(_COLUMNS_BASE) if label == "MAC(s)")
 
 
-class ResultsTable(ctk.CTkScrollableFrame):
+class ResultsTable(ctk.CTkFrame):
     """
-    Scrollable results table.
+    Efficient scrollable results table.
+
+    A single ttk.Treeview stores every row. The previous implementation made
+    one CTkLabel per cell, which became thousands of heavyweight Tk widgets
+    and could block the UI for many minutes on site-sized polls.
 
     Usage:
         table = ResultsTable(parent)
@@ -44,35 +50,41 @@ class ResultsTable(ctk.CTkScrollableFrame):
 
     def __init__(self, master, **kwargs):
         kwargs.setdefault("fg_color", theme.PANEL_BG)
+        kwargs.setdefault("corner_radius", theme.CORNER_R)
         super().__init__(master, **kwargs)
         self._arp_table: ArpTable | None = None
-        self._draw_column_headers()
+        self._build_tree()
 
     # ── Public interface ───────────────────────────────────────────────────
 
     def set_arp_table(self, arp_table: ArpTable | None) -> None:
-        """Set/clear the ARP table used to add IP/Hostname columns. The table
-        only refreshes the next time `populate` is called."""
+        """Set/clear ARP enrichment and update the table columns."""
         self._arp_table = arp_table
+        self._configure_columns()
 
     def clear(self) -> None:
-        """Remove all rows and redraw the column headers."""
-        for widget in self.winfo_children():
-            widget.destroy()
-        self._draw_column_headers()
+        """Remove all rows without rebuilding any widgets."""
+        children = self._tree.get_children()
+        if children:
+            self._tree.delete(*children)
 
     def populate(self, all_data: list[ParsedSwitchData]) -> None:
         """Replace the current contents with rows from all_data."""
         self.clear()
-        row_idx = 1
 
         # Pre-build port → MAC lookup for each switch
         port_macs = _build_port_mac_index(all_data)
         arp       = self._arp_table
 
         for switch in all_data:
-            self._draw_switch_header(row_idx, switch)
-            row_idx += 1
+            parent = self._tree.insert(
+                "",
+                "end",
+                text=switch.hostname or switch.host,
+                values=(switch.host, switch.model or "Unknown", switch.firmware),
+                open=True,
+                tags=("switch",),
+            )
 
             for intf in switch.interfaces:
                 macs_list = port_macs[switch.host].get(intf.port, [])
@@ -92,9 +104,13 @@ class ResultsTable(ctk.CTkScrollableFrame):
                     row_values.append(", ".join(ips))
                     row_values.append(", ".join(h for h in hostnames if h))
                 row_values.append(intf.description)
-
-                self._draw_interface_row(row_idx, row_values, intf.link)
-                row_idx += 1
+                self._tree.insert(
+                    parent,
+                    "end",
+                    text=row_values[0],
+                    values=row_values[1:],
+                    tags=(_link_tag(intf.link),),
+                )
 
     # ── Private drawing helpers ────────────────────────────────────────────
 
@@ -107,64 +123,82 @@ class ResultsTable(ctk.CTkScrollableFrame):
             + _COLUMNS_BASE[_MAC_COL_IDX + 1:]
         )
 
-    def _draw_column_headers(self) -> None:
-        for col, (label, width) in enumerate(self._columns()):
-            ctk.CTkLabel(
-                self,
-                text=label,
-                font=theme.font_bold(11),
-                width=width,
-                anchor="w",
-                text_color=theme.TEXT_MUTED,
-            ).grid(row=0, column=col, padx=(4, 8), pady=(2, 4), sticky="w")
+    def _build_tree(self) -> None:
+        """Create the one table widget and its two scrollbars."""
+        self.grid_rowconfigure(0, weight=1)
+        self.grid_columnconfigure(0, weight=1)
 
-    def _draw_switch_header(self, row_idx: int, switch: ParsedSwitchData) -> None:
-        """Full-width coloured label above each switch's port rows."""
-        label = (
-            f"  {switch.hostname or switch.host}"
-            f"  ({switch.host})"
-            f"  —  {switch.model or 'Unknown'}"
-            f"  fw {switch.firmware}"
+        style = ttk.Style(self)
+        style.configure(
+            "Pint.Treeview",
+            background=theme.PANEL_BG,
+            fieldbackground=theme.PANEL_BG,
+            foreground=theme.TEXT_PRIMARY,
+            rowheight=24,
+            borderwidth=0,
+            font=("Arial", 10),
         )
-        ctk.CTkLabel(
+        style.map(
+            "Pint.Treeview",
+            background=[("selected", theme.NAV_ACTIVE_BG)],
+            foreground=[("selected", theme.TEXT_PRIMARY)],
+        )
+        style.configure(
+            "Pint.Treeview.Heading",
+            background=theme.NAV_INACTIVE_BG,
+            foreground=theme.TEXT_PRIMARY,
+            relief="flat",
+            font=("Arial", 10, "bold"),
+        )
+        style.map(
+            "Pint.Treeview.Heading",
+            background=[("active", theme.NAV_ACTIVE_BG)],
+        )
+
+        self._tree = ttk.Treeview(
             self,
-            text=label,
-            font=theme.font_bold(11),
-            text_color=theme.ACCENT,
-            anchor="w",
-        ).grid(
-            row=row_idx, column=0,
-            columnspan=len(self._columns()),
-            padx=4, pady=(10, 2), sticky="w",
+            show="tree headings",
+            style="Pint.Treeview",
+            selectmode="browse",
         )
+        y_scroll = ttk.Scrollbar(self, orient="vertical", command=self._tree.yview)
+        x_scroll = ttk.Scrollbar(self, orient="horizontal", command=self._tree.xview)
+        self._tree.configure(yscrollcommand=y_scroll.set, xscrollcommand=x_scroll.set)
 
-    def _draw_interface_row(self, row_idx: int, values: list[str], link: str) -> None:
-        """Draw one interface row with link-state colour coding on the Link cell."""
-        text_colour = _link_colour(link)
+        self._tree.grid(row=0, column=0, sticky="nsew", padx=(4, 0), pady=(4, 0))
+        y_scroll.grid(row=0, column=1, sticky="ns", padx=(0, 4), pady=(4, 0))
+        x_scroll.grid(row=1, column=0, sticky="ew", padx=(4, 0), pady=(0, 4))
 
-        for col, (value, (_, width)) in enumerate(zip(values, self._columns())):
-            # Only the Link column gets the link-state colour
-            colour = text_colour if col == 1 else theme.TEXT_PRIMARY
-            ctk.CTkLabel(
-                self,
-                text=value,
-                width=width,
-                anchor="w",
-                font=theme.font_small(10),
-                text_color=colour,
-            ).grid(row=row_idx, column=col, padx=(4, 8), pady=1, sticky="w")
+        self._tree.tag_configure("switch", foreground=theme.ACCENT, font=("Arial", 10, "bold"))
+        self._tree.tag_configure("up", foreground=theme.LINK_UP)
+        self._tree.tag_configure("down", foreground=theme.LINK_DOWN)
+        self._tree.tag_configure("disabled", foreground=theme.LINK_DISABLED)
+        self._configure_columns()
+
+    def _configure_columns(self) -> None:
+        columns = self._columns()
+        value_ids = tuple(f"value_{idx}" for idx in range(1, len(columns)))
+        self._tree.configure(columns=value_ids)
+
+        first_label, first_width = columns[0]
+        self._tree.heading("#0", text=first_label, anchor="w")
+        self._tree.column("#0", width=first_width, minwidth=first_width, stretch=False)
+
+        for column_id, (label, width) in zip(value_ids, columns[1:]):
+            self._tree.heading(column_id, text=label, anchor="w")
+            self._tree.column(column_id, width=width, minwidth=40, stretch=False)
 
 
 # ── Module-level helpers ───────────────────────────────────────────────────
 
-def _link_colour(link: str) -> str:
-    """Return the text colour that corresponds to a link state string."""
+def _link_tag(link: str) -> str:
+    """Return the Treeview tag that corresponds to a link state."""
     key = link.lower()
     if key == "up":
-        return theme.LINK_UP
+        return "up"
     if key == "disabled":
-        return theme.LINK_DISABLED
-    return theme.LINK_DOWN
+        return "disabled"
+    return "down"
 
 
 def _build_port_mac_index(

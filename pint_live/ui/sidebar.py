@@ -430,7 +430,7 @@ class _BulkConfigDialog(ctk.CTkToplevel):
 
 # ── Sidebar ────────────────────────────────────────────────────────────────
 
-class Sidebar(ctk.CTkFrame):
+class Sidebar(ctk.CTkScrollableFrame):
     """
     Left sidebar.
 
@@ -445,18 +445,21 @@ class Sidebar(ctk.CTkFrame):
         kwargs.setdefault("fg_color", theme.SIDEBAR_BG)
         kwargs.setdefault("corner_radius", 0)
         kwargs.setdefault("width", theme.SIDEBAR_W)
+        kwargs.setdefault("scrollbar_button_color", theme.SEPARATOR)
+        kwargs.setdefault("scrollbar_button_hover_color", theme.ACCENT_HOVER)
         super().__init__(master, **kwargs)
-        self.pack_propagate(False)
 
         # Callbacks — assign these after construction
         self.on_poll_requested: callable = lambda cfg: None
         self.on_navigate:       callable = lambda key: None
         self.on_arp_load:       callable = lambda: None
         self.on_arp_clear:      callable = lambda: None
+        self.on_stop_requested: callable = lambda: None
 
         # Internal state
         self._switch_rows: list[_SwitchRow] = []
         self._protocol  = tk.StringVar(value="SSH")
+        self._include_raw_outputs = tk.BooleanVar(value=False)
         self._nav_buttons: dict[str, ctk.CTkButton] = {}
 
         # Shared credential state (lives on the sidebar, edited via bulk modal)
@@ -474,12 +477,25 @@ class Sidebar(ctk.CTkFrame):
         """Used by the bulk-config modal to enumerate switches."""
         return list(self._switch_rows)
 
+    @property
+    def include_raw_outputs(self) -> bool:
+        """Whether Excel exports should include sensitive raw CLI output."""
+        return self._include_raw_outputs.get()
+
     def set_busy(self, busy: bool) -> None:
-        """Disable or re-enable the Poll button during a poll run."""
+        """Toggle the Poll and Stop controls for a poll run."""
         self._poll_btn.configure(
             state="disabled" if busy else "normal",
             text="Polling…" if busy else "Poll Switches",
         )
+        self._stop_btn.configure(
+            state="normal" if busy else "disabled",
+            text="Stop",
+        )
+
+    def set_stop_requested(self) -> None:
+        """Prevent repeat Stop clicks while cancellation is pending."""
+        self._stop_btn.configure(state="disabled", text="Stopping…")
 
     def set_status(self, text: str, colour: str = theme.TEXT_MUTED) -> None:
         """Update the status label below the progress bar."""
@@ -518,6 +534,7 @@ class Sidebar(ctk.CTkFrame):
         self._add_protocol_section()
         theme.separator(self, pady=(6, 6))
         self._add_arp_section()
+        self._add_export_options_section()
         self._add_poll_button()
         self._add_status_area()
 
@@ -683,8 +700,10 @@ class Sidebar(ctk.CTkFrame):
         self._arp_label.pack(fill="x", padx=14, pady=(4, 0))
 
     def _add_poll_button(self) -> None:
+        row = ctk.CTkFrame(self, fg_color="transparent")
+        row.pack(fill="x", padx=14, pady=(10, 0))
         self._poll_btn = ctk.CTkButton(
-            self,
+            row,
             text="Poll Switches",
             height=38,
             font=theme.font_bold(13),
@@ -693,7 +712,49 @@ class Sidebar(ctk.CTkFrame):
             corner_radius=theme.CORNER_R,
             command=self._on_poll_click,
         )
-        self._poll_btn.pack(fill="x", padx=14, pady=(10, 0))
+        self._poll_btn.pack(side="left", fill="x", expand=True, padx=(0, 6))
+
+        self._stop_btn = ctk.CTkButton(
+            row,
+            text="Stop",
+            width=70,
+            height=38,
+            font=theme.font_bold(12),
+            fg_color=theme.REMOVE_BTN_BG,
+            hover_color=theme.REMOVE_BTN_HOVER,
+            corner_radius=theme.CORNER_R,
+            state="disabled",
+            command=lambda: self.on_stop_requested(),
+        )
+        self._stop_btn.pack(side="left")
+
+    def _add_export_options_section(self) -> None:
+        self._raw_output_checkbox = ctk.CTkCheckBox(
+            self,
+            text="Include raw outputs in Excel",
+            variable=self._include_raw_outputs,
+            onvalue=True,
+            offvalue=False,
+            font=theme.font_body(10),
+            text_color=theme.TEXT_MUTED,
+            fg_color=theme.EXPORT_BTN_BG,
+            hover_color=theme.EXPORT_BTN_HOVER,
+            command=self._confirm_raw_outputs,
+        )
+        self._raw_output_checkbox.pack(fill="x", padx=14, pady=(8, 0))
+
+    def _confirm_raw_outputs(self) -> None:
+        if not self._include_raw_outputs.get():
+            return
+        confirmed = messagebox.askyesno(
+            "Sensitive Raw Output",
+            "Raw output includes the complete running configuration and may contain "
+            "password hashes, SNMP communities, usernames, IP addresses, and other "
+            "sensitive client data.\n\nInclude it in Excel exports?",
+            icon="warning",
+        )
+        if not confirmed:
+            self._include_raw_outputs.set(False)
 
     def _add_status_area(self) -> None:
         self._progress_bar = ctk.CTkProgressBar(self, height=6)

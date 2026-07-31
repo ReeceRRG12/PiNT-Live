@@ -18,9 +18,11 @@ from pathlib import Path
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
+from netmiko.exceptions import ReadTimeout
 
 from pint_live.arp          import ArpTable, ArpLoadError, load_arp_xlsx_many
 from pint_live.core.session import Credentials, SwitchTarget, open_session, SessionError
+from pint_live.core.polling import PollCancelled
 from pint_live.exporters    import excel as excel_exporter
 from pint_live.models       import ParsedSwitchData
 from pint_live.vendors      import REGISTRY as VENDORS
@@ -65,6 +67,7 @@ class PintLiveApp(ctk.CTk):
         self._poll_results: list[ParsedSwitchData] = []
         self._arp_table: ArpTable | None = None
         self._msg_queue: queue.Queue = queue.Queue()
+        self._stop_event = threading.Event()
 
         self._build_layout()
         assets.set_taskbar_icon(self)
@@ -87,6 +90,7 @@ class PintLiveApp(ctk.CTk):
         self._sidebar.on_navigate       = self._navigate
         self._sidebar.on_arp_load       = self._load_arp_file
         self._sidebar.on_arp_clear      = self._clear_arp_table
+        self._sidebar.on_stop_requested = self._stop_poll
 
         # ── Content area (right, fills remaining space) ────────────────────
         self._content = ctk.CTkFrame(self, fg_color=theme.BG, corner_radius=0)
@@ -136,6 +140,8 @@ class PintLiveApp(ctk.CTk):
         """
         protocol = config["protocol"]
 
+        self._stop_event.clear()
+
         self._sidebar.set_busy(True)
         self._sidebar.set_progress(0)
         self._sidebar.set_status("Connecting…", theme.ACCENT)
@@ -178,39 +184,96 @@ class PintLiveApp(ctk.CTk):
         Runs in a background thread — never touches the GUI directly.
         Posts messages to _msg_queue for the main thread to consume.
         """
-        results = []
-        errors  = []
-        total   = len(jobs)
+        results: list[ParsedSwitchData] = []
+        errors: list[tuple[str, str]] = []
+        total = len(jobs)
+        stopped = False
 
-        for idx, job in enumerate(jobs):
-            host = job["host"]
-            self._msg_queue.put((
-                "status",
-                f"Connecting to {host} ({job['vendor']})…",
-                theme.ACCENT,
-            ))
-            target = SwitchTarget(host=host, credentials=job["credentials"])
-            try:
-                connection = open_session(target, device_type=job["device_type"])
-                self._msg_queue.put(("status", f"Collecting data from {host}…", theme.ACCENT))
-                raw    = job["collector"].collect(connection, host)
-                connection.disconnect()
-                parsed = job["parser"].parse(raw)
-                results.append(parsed)
-                up    = sum(1 for i in parsed.interfaces if i.link.lower() == "up")
-                total_ports = len(parsed.interfaces)
-                self._msg_queue.put((
-                    "status",
-                    f"✓ {host} — {up}/{total_ports} ports up",
-                    theme.LINK_UP,
-                ))
-            except SessionError as exc:
-                errors.append((host, str(exc)))
-                self._msg_queue.put(("status", f"✗ {host} — {exc}", theme.LINK_DOWN))
+        try:
+            for idx, job in enumerate(jobs):
+                if self._stop_event.is_set():
+                    stopped = True
+                    break
 
-            self._msg_queue.put(("progress", (idx + 1) / total))
+                host = job["host"]
+                target = SwitchTarget(host=host, credentials=job["credentials"])
 
-        self._msg_queue.put(("done", results, errors))
+                # A transient VPN/SSH read failure gets one fresh connection.
+                for attempt in range(1, 3):
+                    connection = None
+                    try:
+                        retry = " (retry)" if attempt == 2 else ""
+                        self._msg_queue.put((
+                            "status",
+                            f"Connecting to {host} ({job['vendor']}){retry}…",
+                            theme.ACCENT,
+                        ))
+                        connection = open_session(target, device_type=job["device_type"])
+                        self._msg_queue.put((
+                            "status", f"Collecting data from {host}{retry}…", theme.ACCENT,
+                        ))
+                        raw = job["collector"].collect(
+                            connection, host, self._stop_event.is_set,
+                        )
+                        parsed = job["parser"].parse(raw)
+                        if not parsed.interfaces:
+                            raise ValueError("No interfaces were recognised in the switch output")
+                        results.append(parsed)
+                        up = sum(1 for i in parsed.interfaces if i.link.lower() == "up")
+                        self._msg_queue.put((
+                            "status",
+                            f"✓ {host} — {up}/{len(parsed.interfaces)} ports up",
+                            theme.LINK_UP,
+                        ))
+                        break
+                    except PollCancelled:
+                        stopped = True
+                        break
+                    except ReadTimeout as exc:
+                        if attempt == 1 and not self._stop_event.is_set():
+                            self._msg_queue.put((
+                                "status", f"Retrying {host} after a response timeout…", theme.WARNING,
+                            ))
+                            continue
+                        message = self._friendly_poll_error(exc)
+                        errors.append((host, message))
+                        self._msg_queue.put(("status", f"✗ {host} — {message}", theme.LINK_DOWN))
+                        break
+                    except Exception as exc:
+                        message = self._friendly_poll_error(exc)
+                        errors.append((host, message))
+                        self._msg_queue.put(("status", f"✗ {host} — {message}", theme.LINK_DOWN))
+                        break
+                    finally:
+                        if connection is not None:
+                            try:
+                                connection.disconnect()
+                            except Exception:
+                                pass
+
+                self._msg_queue.put(("progress", (idx + 1) / total))
+                if stopped:
+                    break
+        except Exception as exc:
+            # Last-resort guard: the UI must never remain permanently busy.
+            errors.append(("Poll worker", self._friendly_poll_error(exc)))
+        finally:
+            self._msg_queue.put(("done", results, errors, stopped))
+
+    @staticmethod
+    def _friendly_poll_error(exc: Exception) -> str:
+        if isinstance(exc, ReadTimeout):
+            return "Timed out waiting for the switch response"
+        message = next((line.strip() for line in str(exc).splitlines() if line.strip()), "")
+        return message or type(exc).__name__
+
+    def _stop_poll(self) -> None:
+        """Request a cooperative stop between CLI commands or switches."""
+        self._stop_event.set()
+        self._sidebar.set_stop_requested()
+        self._sidebar.set_status(
+            "Stopping… waiting for the current command to finish.", theme.WARNING,
+        )
 
     def _drain_message_queue(self) -> None:
         """
@@ -226,13 +289,16 @@ class PintLiveApp(ctk.CTk):
                 elif kind == "progress":
                     self._sidebar.set_progress(msg[1])
                 elif kind == "done":
-                    self._on_poll_finished(msg[1], msg[2])
+                    self._on_poll_finished(msg[1], msg[2], msg[3])
         except queue.Empty:
             pass
         self.after(100, self._drain_message_queue)
 
     def _on_poll_finished(
-        self, results: list[ParsedSwitchData], errors: list[tuple[str, str]]
+        self,
+        results: list[ParsedSwitchData],
+        errors: list[tuple[str, str]],
+        stopped: bool = False,
     ) -> None:
         self._sidebar.set_busy(False)
         self._poll_results = results
@@ -240,19 +306,23 @@ class PintLiveApp(ctk.CTk):
         if results:
             self._results_table.populate(results)
             self._export_btn.configure(state="normal")
-            summary = f"Done — {len(results)} switch(es) polled"
+            summary = (
+                f"Stopped — {len(results)} switch(es) completed"
+                if stopped else f"Done — {len(results)} switch(es) polled"
+            )
             if errors:
                 summary += f", {len(errors)} failed"
-            self._sidebar.set_status(summary, theme.LINK_UP)
+            self._sidebar.set_status(summary, theme.WARNING if stopped else theme.LINK_UP)
         else:
-            self._sidebar.set_status(
-                "No data collected — check IPs and credentials.",
-                theme.LINK_DOWN,
+            message = (
+                "Stopped — no switches completed."
+                if stopped else "No data collected — check IPs and credentials."
             )
+            self._sidebar.set_status(message, theme.WARNING if stopped else theme.LINK_DOWN)
 
         if errors:
             error_text = "\n".join(f"• {host}: {msg}" for host, msg in errors)
-            messagebox.showerror("Connection Errors", f"Failed to connect to:\n\n{error_text}")
+            messagebox.showerror("Polling Errors", f"Some switches failed:\n\n{error_text}")
 
     # ── ARP list ───────────────────────────────────────────────────────────
 
@@ -340,7 +410,10 @@ class PintLiveApp(ctk.CTk):
 
         try:
             saved = excel_exporter.export(
-                self._poll_results, Path(path), arp_table=arp_table,
+                self._poll_results,
+                Path(path),
+                arp_table=arp_table,
+                include_raw_outputs=self._sidebar.include_raw_outputs,
             )
             messagebox.showinfo("Export Complete", f"Workbook saved:\n{saved}")
         except Exception as exc:
