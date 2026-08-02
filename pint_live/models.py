@@ -52,6 +52,17 @@ class LagEntry:
 
 
 @dataclass
+class NeighborEntry:
+    protocol: str
+    local_port: str
+    device_id: str = ""
+    management_ip: str = ""
+    remote_port: str = ""
+    platform: str = ""
+    capabilities: str = ""
+
+
+@dataclass
 class ParsedSwitchData:
     host: str
     hostname: str = ""
@@ -61,4 +72,5 @@ class ParsedSwitchData:
     mac_table: list[MacEntry] = field(default_factory=list)
     vlans: list[VlanEntry] = field(default_factory=list)
     lags: list[LagEntry] = field(default_factory=list)
+    neighbors: list[NeighborEntry] = field(default_factory=list)
     raw_outputs: dict[str, str] = field(default_factory=dict)

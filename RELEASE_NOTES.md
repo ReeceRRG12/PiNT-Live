@@ -2,6 +2,25 @@
 
 ---
 
+## v0.6 — LLDP/CDP Neighbour Discovery (Beta)
+
+Released 2 August 2026.
+
+> **Beta — hardware untested.** The LLDP/CDP collection and export path has passed automated and local synthetic testing, but has not yet been validated against live Ruckus ICX hardware. Use this build for testing and retain v0.5.0 for production work until validation is complete.
+
+### Ruckus neighbour discovery
+- Collects detailed LLDP and CDP neighbour output from Ruckus ICX switches
+- Parses local port, neighbour name, management IP, remote port, platform, and capabilities
+- Adds neighbour protocol, device, management IP, remote port, and platform columns to each switch worksheet, independently of optional ARP-list enrichment
+- Includes both neighbour commands in optional RAW worksheets
+
+### Validation and known limitations
+- Parser, collector, Python compilation, and Excel export smoke tests passed with representative LLDP/CDP detail output
+- Live FastIron command output can vary by firmware; field parsing may need adjustment after hardware testing
+- The CDP detail command may be unavailable when CDP is disabled or unsupported on a particular FastIron release; LLDP and all other collected data remain available
+
+---
+
 ## v0.5.0 — Reliability, LAG Discovery, and Navigable Exports
 
 Released 31 July 2026.

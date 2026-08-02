@@ -72,8 +72,8 @@ def _add_sheet_link(cell, sheet_name: str | None) -> None:
 # Per-switch sheet
 # ---------------------------------------------------------------------------
 
-_INTF_HEADERS_BASE = ["Interface", "Link", "State", "Duplex", "Speed", "Untagged VLAN", "Tagged VLANs", "MAC (from table)", "Description"]
-_INTF_WIDTHS_BASE  = [14,          10,     12,      10,       10,      20,              32,              22,                  30]
+_INTF_HEADERS_BASE = ["Interface", "Link", "State", "Duplex", "Speed", "Untagged VLAN", "Tagged VLANs", "MAC (from table)", "Neighbour Protocol", "Neighbour Device", "Neighbour IP", "Remote Port", "Neighbour Platform", "Description"]
+_INTF_WIDTHS_BASE  = [14,          10,     12,      10,       10,      20,              32,              22,                 18,                   28,                 18,             20,            34,                   30]
 _INTF_HEADERS_ARP  = ["IP (from ARP)", "Hostname (from ARP)"]
 _INTF_WIDTHS_ARP   = [22,              26]
 
@@ -117,11 +117,15 @@ def _write_interfaces_sheet(
     port_macs: dict[str, list[str]] = {}
     for entry in data.mac_table:
         port_macs.setdefault(entry.port, []).append(entry.mac)
+    port_neighbors = {}
+    for neighbor in data.neighbors:
+        port_neighbors.setdefault(neighbor.local_port, []).append(neighbor)
 
     # --- Data rows ---
     for intf in data.interfaces:
         macs_list = port_macs.get(intf.port, [])
         macs = ", ".join(macs_list)
+        neighbors = port_neighbors.get(intf.port, [])
         row = [
             intf.port,
             intf.link,
@@ -137,6 +141,13 @@ def _write_interfaces_sheet(
             hostnames = arp_table.resolve_hostnames(macs_list)
             row.append(", ".join(ips))
             row.append(", ".join(h for h in hostnames if h))
+        row.extend([
+            ", ".join(n.protocol for n in neighbors),
+            ", ".join(n.device_id for n in neighbors),
+            ", ".join(n.management_ip for n in neighbors),
+            ", ".join(n.remote_port for n in neighbors),
+            ", ".join(n.platform for n in neighbors),
+        ])
         row.append(intf.description)
         ws.append(row)
         row_idx = ws.max_row
