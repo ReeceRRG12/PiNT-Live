@@ -13,6 +13,8 @@ class RawSwitchData:
     interfaces_output: str = ""
     mac_table_output: str = ""
     lag_output: str = ""
+    lldp_neighbors_output: str = ""
+    cdp_neighbors_output: str = ""
     running_config_output: str = ""
     error: Optional[str] = None
 
@@ -29,6 +31,8 @@ def collect(connection, host: str, stop_requested=lambda: False) -> RawSwitchDat
         "interfaces_output":     "show interfaces brief",
         "mac_table_output":      "show mac-address",
         "lag_output":            "show lag",
+        "lldp_neighbors_output": "show lldp neighbors detail",
+        "cdp_neighbors_output":  "show cdp neighbors detail",
         "running_config_output": "show running-config",
     }
 

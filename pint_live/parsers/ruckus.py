@@ -3,7 +3,7 @@
 import re
 from typing import Optional
 
-from pint_live.models import InterfaceEntry, LagEntry, MacEntry, VlanEntry, ParsedSwitchData
+from pint_live.models import InterfaceEntry, LagEntry, MacEntry, NeighborEntry, VlanEntry, ParsedSwitchData
 
 
 # ---------------------------------------------------------------------------
@@ -293,6 +293,81 @@ def _enrich_lags_with_vlans(data: ParsedSwitchData) -> None:
 
 
 # ---------------------------------------------------------------------------
+# LLDP / CDP neighbours
+# ---------------------------------------------------------------------------
+
+_NEIGHBOR_FIELD_RE = re.compile(r"^\s*([^:]+?)\s*:\s*(.*?)\s*$")
+
+
+def _neighbor_key(label: str) -> Optional[str]:
+    """Map FastIron LLDP/CDP labels (which vary by release) to our model."""
+    key = re.sub(r"[^a-z0-9]+", " ", label.lower()).strip()
+    if key in {"local port", "local interface", "local intf", "port"}:
+        return "local_port"
+    if key in {"chassis id", "system name", "device id", "device identifier"}:
+        return "device_id"
+    if key in {"port id", "port identifier", "remote port", "remote interface", "interface"}:
+        return "remote_port"
+    if key in {"management address", "management ip", "ip address", "ipv4 address", "address"}:
+        return "management_ip"
+    if key in {"system description", "platform", "device platform"}:
+        return "platform"
+    if key in {"system capabilities", "enabled capabilities", "capabilities", "capability"}:
+        return "capabilities"
+    return None
+
+
+def _clean_neighbor_ip(value: str) -> str:
+    match = re.search(r"(?<![0-9.])(?:\d{1,3}\.){3}\d{1,3}(?![0-9.])", value)
+    return match.group(0) if match else value.strip()
+
+
+def _parse_neighbors(output: str, protocol: str, data: ParsedSwitchData) -> None:
+    """Parse detail output as field blocks, tolerating FastIron label changes."""
+    current: dict[str, str] = {}
+
+    def flush() -> None:
+        if not current.get("local_port"):
+            current.clear()
+            return
+        device_id = current.get("device_id", "")
+        # Prefer the human-friendly system/device name when both it and a
+        # chassis identifier appear in a detail block.
+        if current.get("system_name"):
+            device_id = current["system_name"]
+        data.neighbors.append(NeighborEntry(
+            protocol=protocol,
+            local_port=current.get("local_port", ""),
+            device_id=device_id,
+            management_ip=_clean_neighbor_ip(current.get("management_ip", "")),
+            remote_port=current.get("remote_port", ""),
+            platform=current.get("platform", ""),
+            capabilities=current.get("capabilities", ""),
+        ))
+        current.clear()
+
+    for line in output.splitlines():
+        match = _NEIGHBOR_FIELD_RE.match(line)
+        if not match:
+            if current and (not line.strip() or re.match(r"^[-=]{3,}$", line.strip())):
+                flush()
+            continue
+        label, value = match.groups()
+        normalised_label = re.sub(r"[^a-z0-9]+", " ", label.lower()).strip()
+        key = _neighbor_key(label)
+        if key == "local_port" and current.get("local_port"):
+            flush()
+        if normalised_label == "system name":
+            current["system_name"] = value
+        elif key and value and value.lower() not in {"not advertised", "none", "n/a"}:
+            # Preserve the first useful value except for management address,
+            # where an IPv4 value should replace an earlier subtype line.
+            if key not in current or key == "management_ip":
+                current[key] = value
+    flush()
+
+
+# ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
 
@@ -305,6 +380,8 @@ def parse(raw) -> ParsedSwitchData:
     _parse_lag_output(getattr(raw, "lag_output", ""), data)
     _parse_lag_config(raw.running_config_output, data)
     _parse_running_config(raw.running_config_output, data)
+    _parse_neighbors(getattr(raw, "lldp_neighbors_output", ""), "LLDP", data)
+    _parse_neighbors(getattr(raw, "cdp_neighbors_output", ""), "CDP", data)
     _enrich_interfaces_with_vlans(data)
     _enrich_lags_with_vlans(data)
     data.raw_outputs = {
@@ -312,6 +389,8 @@ def parse(raw) -> ParsedSwitchData:
         "show interfaces brief": raw.interfaces_output,
         "show mac-address": raw.mac_table_output,
         "show lag": getattr(raw, "lag_output", ""),
+        "show lldp neighbors detail": getattr(raw, "lldp_neighbors_output", ""),
+        "show cdp neighbors detail": getattr(raw, "cdp_neighbors_output", ""),
         "show running-config": raw.running_config_output,
     }
     return data

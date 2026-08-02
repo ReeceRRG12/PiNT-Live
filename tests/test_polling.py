@@ -147,19 +147,54 @@ class CollectorCancellationTests(unittest.TestCase):
             "interfaces",
             "macs",
             "lags",
+            "lldp neighbors",
+            "cdp neighbors",
             "running config",
         ]
 
         raw = ruckus.collect(connection, "10.0.0.1")
 
         self.assertEqual(raw.version_output, "SW: Version 09.0.10h")
-        self.assertEqual(connection.send_command_timing.call_count, 5)
+        self.assertEqual(raw.lldp_neighbors_output, "lldp neighbors")
+        self.assertEqual(raw.cdp_neighbors_output, "cdp neighbors")
+        self.assertEqual(connection.send_command_timing.call_count, 7)
         connection.send_command.assert_not_called()
         for call in connection.send_command_timing.call_args_list:
             self.assertEqual(call.kwargs, {"last_read": 3.0, "read_timeout": 120})
 
 
 class RuckusParserTests(unittest.TestCase):
+    def test_lldp_and_cdp_neighbor_details_include_management_ips(self):
+        raw = SimpleNamespace(
+            host="10.0.0.1", version_output="", interfaces_output="", mac_table_output="",
+            lag_output="", running_config_output="",
+            lldp_neighbors_output='''
+Local port: 1/1/1
+Chassis ID: aa:bb:cc:dd:ee:ff
+System Name: AP-LOBBY
+Port ID: eth0
+Management Address: 10.20.30.40
+System Description: Ruckus R750
+System Capabilities: Bridge, WLAN AP
+''',
+            cdp_neighbors_output='''
+Device ID: ACCESS-SW-02
+Local Interface: 1/1/48
+Interface: GigabitEthernet1/0/48
+IP Address: 10.20.30.2
+Platform: cisco C9200L
+Capabilities: Switch IGMP
+''',
+        )
+
+        parsed = ruckus_parser.parse(raw)
+
+        self.assertEqual(len(parsed.neighbors), 2)
+        self.assertEqual(parsed.neighbors[0].device_id, "AP-LOBBY")
+        self.assertEqual(parsed.neighbors[0].management_ip, "10.20.30.40")
+        self.assertEqual(parsed.neighbors[1].local_port, "1/1/48")
+        self.assertEqual(parsed.neighbors[1].management_ip, "10.20.30.2")
+
     def test_lags_include_members_health_and_vlan_assignments(self):
         raw = SimpleNamespace(
             host="10.0.0.1",

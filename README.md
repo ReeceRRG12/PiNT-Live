@@ -21,10 +21,10 @@ PiNT Live fixes that. Provide it with a list of switch IPs and credentials, poin
 - **Per-switch or shared credentials** — use one username/password for the whole site, or override per switch via the **Configure all switches…** modal
 - **Resilient site polling** — a failed switch is recorded without breaking the chain; transient read timeouts receive one clean reconnect/retry, and every session is closed reliably
 - **Stop control** — cooperatively stop between commands or switches while preserving completed results
-- **Live data collection** — collects version/system, interface, MAC-table, running configuration, and Ruckus LAG information using vendor-appropriate commands
+- **Live data collection** — collects version/system, interface, MAC-table, running configuration, and Ruckus LAG and LLDP/CDP neighbour information using vendor-appropriate commands
 - **Ruckus LAG visibility** — maps LAG names and IDs to physical members, member health, and tagged/untagged VLANs
 - **Optional ARP enrichment** — load one or more ARP exports (.xlsx) and PiNT Live maps every port's MAC to its IP and hostname
-- **Structured Excel export** — Summary, per-switch, and Ruckus LAG sheets with port-state colour coding, VLANs, MACs, and optional ARP-resolved IP/Hostname columns
+- **Structured Excel export** — Summary, per-switch, and Ruckus LAG sheets with port-state colour coding, VLANs, MACs, LLDP/CDP neighbour names and management IPs, and optional ARP-resolved IP/Hostname columns
 - **Workbook navigation** — Summary links open each switch's Main, RAW, and LAG sheets; every detail sheet links back to Summary
 - **Optional raw-output sheets** — include searchable, line-numbered CLI output when needed, with an explicit sensitive-data warning
 - **Large-site UI performance** — a lightweight results table handles site-sized polls without creating thousands of individual GUI widgets
@@ -100,7 +100,7 @@ pint-live/
 
 ## 🚧 Status
 
-**v0.5.0** — resilient polling, scalable results rendering, Ruckus LAG discovery, optional raw-output worksheets, and navigable Excel workbooks. Ruckus and HP/Aruba have been validated against lab hardware; Cisco IOS / IOS-XE remains implemented but awaits hardware validation. See [RELEASE_NOTES.md](RELEASE_NOTES.md) for full change history.
+**v0.6 Beta** — adds Ruckus LLDP/CDP neighbour discovery and exports neighbour management IPs without requiring an ARP list. This feature is hardware-untested; v0.5.0 remains the recommended production build until validation is complete. See [RELEASE_NOTES.md](RELEASE_NOTES.md) for full change history.
 
 ---
 
