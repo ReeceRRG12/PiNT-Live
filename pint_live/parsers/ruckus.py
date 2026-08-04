@@ -306,9 +306,15 @@ def _neighbor_key(label: str) -> Optional[str]:
         return "local_port"
     if key in {"chassis id", "system name", "device id", "device identifier"}:
         return "device_id"
-    if key in {"port id", "port identifier", "remote port", "remote interface", "interface"}:
+    if key in {
+        "port id", "port identifier", "port description", "remote port",
+        "remote interface", "interface",
+    }:
         return "remote_port"
-    if key in {"management address", "management ip", "ip address", "ipv4 address", "address"}:
+    if (
+        key in {"management address", "management ip", "ip address", "ipv4 address", "address"}
+        or key.startswith("management address ipv")
+    ):
         return "management_ip"
     if key in {"system description", "platform", "device platform"}:
         return "platform"
@@ -320,6 +326,14 @@ def _neighbor_key(label: str) -> Optional[str]:
 def _clean_neighbor_ip(value: str) -> str:
     match = re.search(r"(?<![0-9.])(?:\d{1,3}\.){3}\d{1,3}(?![0-9.])", value)
     return match.group(0) if match else value.strip()
+
+
+def _clean_neighbor_value(value: str) -> str:
+    """Remove matching CLI quotes without altering punctuation inside values."""
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+        return value[1:-1]
+    return value
 
 
 def _parse_neighbors(output: str, protocol: str, data: ParsedSwitchData) -> None:
@@ -338,11 +352,11 @@ def _parse_neighbors(output: str, protocol: str, data: ParsedSwitchData) -> None
         data.neighbors.append(NeighborEntry(
             protocol=protocol,
             local_port=current.get("local_port", ""),
-            device_id=device_id,
+            device_id=_clean_neighbor_value(device_id),
             management_ip=_clean_neighbor_ip(current.get("management_ip", "")),
-            remote_port=current.get("remote_port", ""),
-            platform=current.get("platform", ""),
-            capabilities=current.get("capabilities", ""),
+            remote_port=_clean_neighbor_value(current.get("remote_port", "")),
+            platform=_clean_neighbor_value(current.get("platform", "")),
+            capabilities=_clean_neighbor_value(current.get("capabilities", "")),
         ))
         current.clear()
 

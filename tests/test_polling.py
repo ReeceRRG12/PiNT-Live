@@ -170,12 +170,14 @@ class RuckusParserTests(unittest.TestCase):
             lag_output="", running_config_output="",
             lldp_neighbors_output='''
 Local port: 1/1/1
-Chassis ID: aa:bb:cc:dd:ee:ff
-System Name: AP-LOBBY
-Port ID: eth0
-Management Address: 10.20.30.40
-System Description: Ruckus R750
-System Capabilities: Bridge, WLAN AP
+  Neighbor: 80f0.cf1a.e0fb, TTL 92 seconds
+  + Chassis ID (MAC address): 80f0.cf1a.e0c8
+  + Port ID (MAC address): 80f0.cf1a.e0fb
+  + System name         : "AP-LOBBY"
+  + Port description    : "25GigabitEthernet1/2/3"
+  + System description  : "Ruckus R750"
+  + System capabilities : Bridge, WLAN AP
+- Management address (IPv4): 10.20.30.40
 ''',
             cdp_neighbors_output='''
 Device ID: ACCESS-SW-02
@@ -192,6 +194,8 @@ Capabilities: Switch IGMP
         self.assertEqual(len(parsed.neighbors), 2)
         self.assertEqual(parsed.neighbors[0].device_id, "AP-LOBBY")
         self.assertEqual(parsed.neighbors[0].management_ip, "10.20.30.40")
+        self.assertEqual(parsed.neighbors[0].remote_port, "25GigabitEthernet1/2/3")
+        self.assertEqual(parsed.neighbors[0].platform, "Ruckus R750")
         self.assertEqual(parsed.neighbors[1].local_port, "1/1/48")
         self.assertEqual(parsed.neighbors[1].management_ip, "10.20.30.2")
 

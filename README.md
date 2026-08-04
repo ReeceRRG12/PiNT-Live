@@ -100,7 +100,7 @@ pint-live/
 
 ## 🚧 Status
 
-**v0.6 Beta** — adds Ruckus LLDP/CDP neighbour discovery and exports neighbour management IPs without requiring an ARP list. This feature is hardware-untested; v0.5.0 remains the recommended production build until validation is complete. See [RELEASE_NOTES.md](RELEASE_NOTES.md) for full change history.
+**v0.6.1 Stable** — Ruckus LLDP/CDP neighbour discovery is hardware-tested and exports neighbour names, management IPs, remote ports, and platforms without requiring an ARP list. This release fixes the field-format issues found during v0.6 beta testing. See [RELEASE_NOTES.md](RELEASE_NOTES.md) for full change history.
 
 ---
 
