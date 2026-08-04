@@ -2,6 +2,26 @@
 
 ---
 
+## v0.6.1 — Stable LLDP/CDP Neighbour Discovery
+
+Released 4 August 2026.
+
+This stable maintenance release fixes faults found during live hardware testing of the v0.6 beta. Ruckus LLDP/CDP neighbour discovery is now validated against real FastIron output and v0.6.1 supersedes the beta for normal use.
+
+### Fixes from the v0.6 beta
+- Fixed missing neighbour management IPs when FastIron labels the field as `Management address (IPv4)` rather than `Management address`
+- Added support for parenthesized IPv4/IPv6 management-address field variants
+- Fixed blank **Remote Port** cells by recognising FastIron's `Port description` field
+- Removed surrounding CLI quotation marks from neighbour device names, remote ports, platforms, and capabilities
+
+### Validation
+- Validated with a real v0.6 workbook and captured Ruckus ICX FastIron `show lldp neighbors detail` output
+- Added regression coverage using the hardware output format that exposed the beta issue
+- All 12 automated tests pass
+- The Windows release workflow reruns the complete suite before producing the standalone executable and checksum
+
+---
+
 ## v0.6 — LLDP/CDP Neighbour Discovery (Beta)
 
 Released 2 August 2026.
