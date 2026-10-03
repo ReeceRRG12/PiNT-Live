@@ -10,7 +10,7 @@ import re
 import sys
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 
 root = Path(SPECPATH)
 version = runpy.run_path(str(root / "pint_live" / "__init__.py"))["__version__"]
@@ -24,6 +24,9 @@ a = Analysis(
     datas=(
         collect_data_files("customtkinter")
         + collect_data_files("ntc_templates")
+        # ntc_templates and invoke read importlib.metadata at import time.
+        # Include Netmiko's dependency metadata, including platform markers.
+        + copy_metadata("netmiko", recursive=True)
         + [(str(logo), "pint_live/ui/assets")]
     ),
     hiddenimports=collect_submodules("netmiko"),

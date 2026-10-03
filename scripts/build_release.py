@@ -1,7 +1,7 @@
 """Build and verify native release assets (Python 3.12 recommended).
 
     python -m pip install . "pyinstaller>=6.10,<7"
-    python scripts/build_release.py --tag v0.7.0-beta.1
+    python scripts/build_release.py --tag v0.7.0-beta.2
 
 Windows produces a portable x64 EXE. macOS produces a DMG containing the
 native .app and an Applications shortcut. Outputs live in dist/release/.
@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def package_version(tag: str) -> str:
     match = re.fullmatch(r"v(\d+\.\d+\.\d+)(?:-(alpha|beta|rc)\.(\d+))?", tag)
     if match is None:
-        raise ValueError("Use a release tag such as v0.7.0-beta.1 or v0.7.0")
+        raise ValueError("Use a release tag such as v0.7.0-beta.2 or v0.7.0")
     version, channel, number = match.groups()
     return version + ({"alpha": "a", "beta": "b", "rc": "rc"}[channel] + number if channel else "")
 
@@ -55,6 +55,22 @@ def verify_windows_x64(executable: Path) -> None:
         stream.seek(pe_offset)
         if stream.read(6) != b"PE\0\0\x64\x86":
             raise RuntimeError("Windows executable is not an x64 PE binary")
+
+
+def verify_frozen_app(executable: Path, report_path: Path, source_version: str) -> None:
+    report_path.unlink(missing_ok=True)
+    result = subprocess.run(
+        [str(executable), "--smoke-test", str(report_path)], cwd=ROOT, timeout=90,
+    )
+    # Windowed apps have no console: print their report before raising for a
+    # nonzero exit so CI logs expose the original startup/callback exception.
+    if not report_path.is_file():
+        raise RuntimeError(f"Frozen GUI exited {result.returncode} without a smoke report")
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    print("Frozen GUI smoke report:\n" + json.dumps(report, indent=2), flush=True)
+    result.check_returncode()
+    if not report.get("ok") or report.get("version") != source_version:
+        raise RuntimeError("Frozen application smoke check failed; see report above")
 
 
 def build(tag: str) -> None:
@@ -89,12 +105,7 @@ def build(tag: str) -> None:
         verify_windows_x64(executable)
 
     report_path = ROOT / "build" / f"{stem}-smoke.json"
-    report_path.unlink(missing_ok=True)
-    subprocess.run([str(executable), "--smoke-test", str(report_path)], cwd=ROOT, check=True, timeout=90)
-    report = json.loads(report_path.read_text(encoding="utf-8"))
-    if not report.get("ok") or report.get("version") != source_version:
-        raise RuntimeError(f"Frozen application smoke check failed: {report}")
-    print(f"Frozen GUI smoke check passed: {report}", flush=True)
+    verify_frozen_app(executable, report_path, source_version)
 
     if system == "Windows":
         asset = output / f"{stem}.exe"

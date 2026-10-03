@@ -2,7 +2,7 @@
 
 ---
 
-## v0.7.0-beta.1 — Desktop Experience (Beta)
+## v0.7.0-beta.2 — Desktop Experience (Beta)
 
 Prepared 3 October 2026. Live switch validation is still outstanding; v0.6.1 remains stable.
 
