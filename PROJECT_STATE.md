@@ -20,8 +20,11 @@
 - Desktop check: macOS startup initially exposed an existing ICO callback error; after the icon fix it completed with no Tk callback errors. The sandbox could not start Tk, so this check ran with approved desktop access.
 - Cisco VLAN command semantics were checked against [Cisco's command reference](https://www.cisco.com/c/en/us/td/docs/switches/connectedgrid/cgs2520/software/release/12_2_53_ex/command/reference/cr2520/cli3.pdf), pages 93–94. Fixtures are synthetic; no live switches were contacted.
 - User subsequently authorized pushing a beta branch and publishing a beta release with a Windows EXE (explicitly clarified from “EXT”).
-- Current stage: preparing `codex/beta-v0.6.2` and tag `v0.6.2-beta.1`, package/app version `0.6.2b1`. The release workflow marks hyphenated prerelease tags as prereleases and excludes them from Latest.
-- Next action: verify release metadata and tests, commit and push the beta branch/tag, wait for the Windows build, then verify the published executable, checksum, and prerelease flag. Stable v0.6.1 remains unchanged.
+- Current stage: beta delivery complete. Branch `codex/beta-v0.6.2` and tag `v0.6.2-beta.1` were pushed; release code is commit `6ad8303d2653d57f4f3b1f9b01725d8736f6eab5`, package/app version `0.6.2b1`. This checkpoint-only follow-up does not change the tagged code.
+- Published [PiNT Live v0.6.2 Beta 1](https://github.com/ReeceRRG12/PiNT-Live/releases/tag/v0.6.2-beta.1). GitHub confirms it is a published prerelease, with an EXE and checksum attached; `v0.6.1` remains Latest/stable.
+- [Windows build 37151346773](https://github.com/ReeceRRG12/PiNT-Live/actions/runs/37151346773) succeeded on the tagged commit: all 33 tests passed and PyInstaller built the executable successfully.
+- Download verification: `PiNT-Live-v0.6.2-beta.1-Windows.exe` is a Windows x64 PE file, 32,413,580 bytes. Its SHA-256 matches both the published checksum file and GitHub asset digest: `e287e75364359e69903263e3f66226569fa80d7858705d366ff194d908c4523e`.
+- Next action: test the beta EXE interactively on Windows and supported switch hardware, especially Cisco VLAN modifiers and Telnet. Stable promotion remains outside the authorized beta scope.
 - Model setting unchanged; no active routing exception.
 
 ## Backlog
