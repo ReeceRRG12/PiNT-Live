@@ -3,12 +3,25 @@
 ## Brief
 
 - **Purpose:** turn live, mixed-vendor switch data into accurate, shareable network documentation.
-- **Deliverable:** the existing Python desktop app and navigable Excel workbooks described in `README.md`.
-- **Success:** supported polling paths report failures accurately; exports preserve collected data as text and keep navigation valid; automated regression checks pass.
+- **Deliverable:** a refreshed Python desktop app, navigable Excel workbooks, and a new beta release with Windows EXE and macOS DMG downloads.
+- **Success:** clearer setup and readable results; usable Windows/macOS sizing; supported polling/export behavior preserved; automated checks pass; native release builds and published asset checksums verified.
 - **Constraints:** preserve the current desktop workflow and vendor support. Credentials stay in memory; raw configuration export remains opt-in. Live hardware validation must be distinguished from simulated checks.
-- **Non-goals:** scheduled/headless polling, desired-state configuration changes, UI redesign, and promoting this beta to stable.
-- **Stages:** review and bounded fixes (complete) → local verification (complete) → beta branch, Windows build, and GitHub prerelease (authorized 3 October 2026).
-- **Finish condition:** scoped fixes verified, beta branch pushed, Windows executable and checksum attached to a verified GitHub prerelease, and remaining validation recorded here.
+- **Non-goals:** scheduled/headless polling, desired-state configuration changes, and promoting this beta to stable without live hardware validation.
+- **Stages:** latest-code baseline (complete) → GUI and desktop packaging → local verification → native CI builds and GitHub prerelease.
+- **Finish condition:** scoped GUI changes verified, new beta published with Windows EXE and Mac DMGs/checksums, and remaining platform/hardware validation recorded here.
+
+## Active checkpoint — desktop release, 3 October 2026
+
+- User requested pulling latest code, making the GUI nicer/easier, Windows EXE and macOS DMG distribution, and a new release. This explicitly expands the prior scope to UI redesign and Mac packaging.
+- `git pull --ff-only` confirmed clean `main` at `20d67dc` is current. Baseline: all 33 automated tests pass.
+- Work branch: `codex/desktop-v0.7.0`. Planned release: `v0.7.0-beta.1` / package version `0.7.0b1`; retain beta classification because hardware validation is outstanding.
+- Implemented: slate/teal workspace, summary cards, numbered setup, persistent poll/stop/status controls, credential readiness, keyboard search/export, searchable link-filtered results, Retina asset loading, native DPI sizing and matching table scaling. Search filters do not change export data.
+- Packaging: Windows x64 portable EXE and native Apple Silicon/Intel Mac apps in DMGs with Applications shortcuts. Three native CI jobs run tests and actual frozen-GUI startup checks; publication depends on all three and verifies checksums. Builds are not publisher-signed or Apple-notarized.
+- Local verification: all **44 tests** pass; compileall, pip check, and git diff --check pass. Mac desktop checks covered empty and populated views, 980×620 resizing, keyboard search (1 of 16 ports while metrics retain full totals), and bulk credentials dialog. No Tk callback errors. Fixed export-footer clipping discovered visually; independent review also caught and resolved a debounce cancellation issue.
+- Current stage: local GUI/source verification complete; native package build verification in progress. Next: publish and verify v0.7.0-beta.1 assets, then update main and this checkpoint.
+- Documentation references: [CustomTkinter native scaling](https://customtkinter.tomschimansky.com/documentation/scaling/), [GitHub native runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners), [PyInstaller native builds](https://www.pyinstaller.org/en/stable/usage.html), and [Apple first-launch guidance](https://support.apple.com/en-gb/102445).
+- Remaining validation: live switch hardware and interactive Windows/high-DPI testing. No switches contacted during this work.
+- Native usage check: 53% used / 47% remaining in the visible weekly window; secondary window unavailable. No model change or active routing exception.
 
 ## Checkpoint — 3 October 2026
 

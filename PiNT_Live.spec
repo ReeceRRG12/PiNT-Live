@@ -1,79 +1,82 @@
 # -*- mode: python ; coding: utf-8 -*-
-#
-# PiNT Live — PyInstaller build spec
-#
-# Produces a single standalone Windows .exe with no Python install required.
-#
-# Run from the project root with:
-#     python -m PyInstaller PiNT_Live.spec
-#
-# Output: dist/PiNT Live.exe
+"""Native Windows portable EXE and macOS .app builds.
+
+Run scripts/build_release.py to build, smoke-test and package release assets.
+PyInstaller must run on the target OS/architecture; it is not a cross-compiler.
+"""
+
+import runpy
+import re
+import sys
+from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
-# ── Data files ─────────────────────────────────────────────────────────────
-#
-# customtkinter ships theme JSON files and images that it loads at runtime
-# using __file__ — PyInstaller won't find them automatically.
-customtkinter_datas = collect_data_files("customtkinter")
-
-# ntc-templates ships TextFSM template files that netmiko uses for parsing.
-ntc_templates_datas = collect_data_files("ntc_templates")
-
-# Our own logo asset.  The dest folder "assets" matches what assets.py
-# looks for relative to sys._MEIPASS when running frozen.
-pint_live_datas = [
-    ("pint_live/ui/assets/PiNT_InAppLogo.png", "assets"),
-]
-
-all_datas = customtkinter_datas + ntc_templates_datas + pint_live_datas
-
-# ── Hidden imports ─────────────────────────────────────────────────────────
-#
-# netmiko loads device-type classes dynamically (e.g. ruckus_fastiron,
-# cisco_ios) so PyInstaller can't detect them through static analysis.
-# collect_submodules pulls them all in so every vendor works at runtime.
-netmiko_hidden = collect_submodules("netmiko")
-
-# ── Analysis ───────────────────────────────────────────────────────────────
+root = Path(SPECPATH)
+version = runpy.run_path(str(root / "pint_live" / "__init__.py"))["__version__"]
+logo = root / "pint_live" / "ui" / "assets" / "PiNT_InAppLogo.png"
+is_macos = sys.platform == "darwin"
 
 a = Analysis(
-    ["pint_live/main.py"],
-    pathex=["."],
+    [str(root / "scripts" / "desktop_entrypoint.py")],
+    pathex=[str(root)],
     binaries=[],
-    datas=all_datas,
-    hiddenimports=netmiko_hidden,
+    datas=(
+        collect_data_files("customtkinter")
+        + collect_data_files("ntc_templates")
+        + [(str(logo), "pint_live/ui/assets")]
+    ),
+    hiddenimports=collect_submodules("netmiko"),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[
-        # Exclude test frameworks and anything else we don't need at runtime
-        "pytest", "unittest", "doctest",
-    ],
+    excludes=["pytest", "unittest", "doctest"],
     noarchive=False,
 )
 
 pyz = PYZ(a.pure)
 
-# ── Executable ─────────────────────────────────────────────────────────────
-
+# macOS uses an onedir bundle: no extraction on every launch, and compatible
+# with future Developer ID signing. Windows keeps the single-file workflow.
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
+    [] if is_macos else a.binaries,
+    [] if is_macos else a.datas,
     [],
-    name="PiNT Live",          # output filename: "PiNT Live.exe"
+    exclude_binaries=is_macos,
+    name="PiNT Live",
+    icon=str(logo),
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,                  # compress the exe if UPX is available
-    upx_exclude=[],
+    upx=False,
     runtime_tmpdir=None,
-    console=False,             # no black console window behind the GUI
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
 )
+
+if is_macos:
+    coll = COLLECT(
+        exe, a.binaries, a.datas,
+        strip=False, upx=False, name="PiNT Live",
+    )
+    app = BUNDLE(
+        coll,
+        name="PiNT Live.app",
+        icon=str(logo),
+        bundle_identifier="com.pintlive.desktop",
+        version=re.match(r"\d+\.\d+\.\d+", version).group(),
+        info_plist={
+            "CFBundleDisplayName": "PiNT Live",
+            "CFBundleVersion": version,
+            "NSHighResolutionCapable": True,
+            "NSLocalNetworkUsageDescription": (
+                "PiNT Live connects to switches you select to read network data."
+            ),
+        },
+    )

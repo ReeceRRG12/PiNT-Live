@@ -2,6 +2,22 @@
 
 ---
 
+## v0.7.0-beta.1 — Desktop Experience (Beta)
+
+Prepared 3 October 2026. Live switch validation is still outstanding; v0.6.1 remains stable.
+
+- Refreshed slate-and-teal workspace with readable platform fonts, clearer spacing, onboarding guidance, and switch/port/link/MAC totals.
+- Numbered setup steps, visible credential readiness, per-switch vendor labels, and larger configuration dialogs with Return/Escape controls.
+- Poll, Stop, progress, and navigation remain visible as setup scrolls.
+- Search across switch identity, ports, VLANs, MACs, descriptions and loaded ARP fields; combine search with link-state filters. Exports still include every collected result.
+- Native Cmd/Ctrl shortcuts for search and export, Retina-quality logo loading, and screen-fitting window sizing without applying Windows DPI multiple times.
+- Native Windows x64 portable EXE plus Apple Silicon and Intel macOS DMGs. Mac users drag the app to Applications; no Python installation is required.
+- Release publishing waits for every platform's tests, frozen-app smoke check, and build. Downloads include SHA-256 checksums.
+
+Validation is recorded in `PROJECT_STATE.md`. Builds are not publisher-signed or Apple-notarized, so operating-system trust prompts may appear. Real switch polling and interactive Windows validation remain required before stable promotion.
+
+---
+
 ## v0.6.2-beta.1 — Polling and Export Reliability (Beta)
 
 Beta release prepared 3 October 2026. These changes are awaiting live hardware validation; v0.6.1 remains the stable release.

@@ -1,48 +1,30 @@
-"""
-PiNT Live — DPI / display scale manager.
+"""Choose a usable initial size while leaving native DPI handling to CTk.
 
-Detects the system display scale on Windows and applies it to
-customtkinter so the UI looks crisp on high-DPI screens.
+CustomTkinter automatically scales windows and widgets on Windows and macOS.
+Passing the system DPI to its custom scaling setters would apply it twice.
+All application window dimensions should therefore use logical pixels.
 """
 
 import customtkinter as ctk
 
-_scale: float = 1.0
 
+def initial_window_size(
+    window: ctk.CTk,
+    preferred: tuple[int, int] = (1240, 820),
+    margin: tuple[int, int] = (64, 96),
+) -> tuple[int, int]:
+    """Fit the initial logical size to the screen, leaving room for OS chrome.
 
-def detect_scale() -> float:
+    Tk reports physical pixels on DPI-aware Windows. Use the same conversion
+    as CTk's geometry implementation; on macOS Tk already uses logical pixels
+    and CTk's factor is one. This does not change the native scaling settings.
+    Call after constructing the CTk root, before setting its geometry.
     """
-    Read the system DPI on Windows and return a scale factor.
-    Returns 1.0 on non-Windows or if detection fails.
-
-    Examples:
-        96 dpi  → 1.0   (standard display)
-        120 dpi → 1.25  (Windows 125 %)
-        144 dpi → 1.5   (Windows 150 %)
-        192 dpi → 2.0   (Windows 200 %)
-    """
-    try:
-        import ctypes
-        ctypes.windll.shcore.SetProcessDpiAwareness(1)
-        dc  = ctypes.windll.user32.GetDC(0)
-        dpi = ctypes.windll.gdi32.GetDeviceCaps(dc, 88)  # LOGPIXELSX constant
-        ctypes.windll.user32.ReleaseDC(0, dc)
-        return round(dpi / 96.0, 2)
-    except Exception:
-        return 1.0
-
-
-def apply_scale(scale: float) -> None:
-    """
-    Push the detected scale into customtkinter.
-    Must be called before the CTk root window is created.
-    """
-    global _scale
-    _scale = scale
-    ctk.set_widget_scaling(scale)
-    ctk.set_window_scaling(scale)
-
-
-def current_scale() -> float:
-    """Return the scale factor that was last applied."""
-    return _scale
+    screen = (
+        window._reverse_window_scaling(window.winfo_screenwidth()),
+        window._reverse_window_scaling(window.winfo_screenheight()),
+    )
+    return tuple(
+        max(1, min(target, available - inset))
+        for target, available, inset in zip(preferred, screen, margin)
+    )

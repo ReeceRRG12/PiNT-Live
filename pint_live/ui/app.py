@@ -12,6 +12,7 @@ individual UI modules; this file only:
 from __future__ import annotations
 
 import queue
+import sys
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -25,11 +26,12 @@ from pint_live.core.session import Credentials, SwitchTarget, open_session, Sess
 from pint_live.core.polling import PollCancelled
 from pint_live.exporters    import excel as excel_exporter
 from pint_live.models       import ParsedSwitchData
+from pint_live import __version__
 from pint_live.vendors      import REGISTRY as VENDORS
 
 from pint_live.ui            import theme
 from pint_live.ui            import assets
-from pint_live.ui.scale_manager import detect_scale, apply_scale
+from pint_live.ui.scale_manager import initial_window_size
 from pint_live.ui.sidebar       import Sidebar
 from pint_live.ui.results_table import ResultsTable
 from pint_live.ui.about_panel   import AboutPanel
@@ -56,10 +58,9 @@ class PintLiveApp(ctk.CTk):
         super().__init__()
 
         self.title("PiNT Live")
-        _s = detect_scale()
-        apply_scale(_s)
-        self.geometry(f"{round(1200 * _s)}x{round(800 * _s)}")
-        self.minsize(900, 600)
+        width, height = initial_window_size(self)
+        self.geometry(f"{width}x{height}")
+        self.minsize(min(980, width), min(620, height))
         self.resizable(True, True)
         self.configure(fg_color=theme.BG)
 
@@ -68,12 +69,17 @@ class PintLiveApp(ctk.CTk):
         self._arp_table: ArpTable | None = None
         self._msg_queue: queue.Queue = queue.Queue()
         self._stop_event = threading.Event()
+        self._search_after = None
+        self._polling = False
 
         self._build_layout()
         assets.set_taskbar_icon(self)
 
         # Start with the poll view active
         self._navigate("poll")
+        modifier = "Command" if sys.platform == "darwin" else "Control"
+        self.bind(f"<{modifier}-f>", self._focus_search)
+        self.bind(f"<{modifier}-e>", lambda event: self._export())
 
         # Begin draining the background thread's message queue
         self._drain_message_queue()
@@ -100,13 +106,87 @@ class PintLiveApp(ctk.CTk):
         self._results_view = ctk.CTkFrame(self._content, fg_color=theme.BG, corner_radius=0)
         self._results_view.place(relwidth=1, relheight=1)
 
-        self._results_table = ResultsTable(self._results_view)
-        self._results_table.pack(fill="both", expand=True, padx=12, pady=(12, 4))
+        header = ctk.CTkFrame(self._results_view, fg_color="transparent")
+        header.pack(fill="x", padx=24, pady=(26, 18))
+        ctk.CTkLabel(
+            header, text=f"v{__version__}", font=theme.font_body(12),
+            text_color=theme.ACCENT, fg_color=theme.NAV_ACTIVE_BG,
+            corner_radius=8, width=94, height=30,
+        ).pack(side="right", anchor="n", pady=4)
+        ctk.CTkLabel(
+            header, text="Network overview", font=theme.font_heading(28),
+            text_color=theme.TEXT_PRIMARY, anchor="w",
+        ).pack(fill="x")
+        ctk.CTkLabel(
+            header, text="Live switch data. Clear network documentation.",
+            font=theme.font_body(13), text_color=theme.TEXT_MUTED, anchor="w",
+        ).pack(fill="x", pady=(4, 0))
+
+        metrics = ctk.CTkFrame(self._results_view, fg_color="transparent")
+        metrics.pack(fill="x", padx=24, pady=(0, 20))
+        self._metric_values = {}
+        for column, (key, label, color) in enumerate([
+            ("switches", "SWITCHES", theme.TEXT_PRIMARY),
+            ("ports", "PORTS", theme.TEXT_PRIMARY),
+            ("up", "LINKS UP", theme.LINK_UP),
+            ("macs", "MAC ENTRIES", theme.ACCENT),
+        ]):
+            metrics.grid_columnconfigure(column, weight=1, uniform="metric")
+            card = ctk.CTkFrame(metrics, fg_color=theme.PANEL_BG, corner_radius=10)
+            card.grid(row=0, column=column, sticky="ew", padx=(0, 10 if column < 3 else 0))
+            value = ctk.CTkLabel(card, text="—", text_color=color, font=theme.font_heading(26), anchor="w")
+            value.pack(fill="x", padx=16, pady=(12, 0))
+            ctk.CTkLabel(card, text=label, text_color=theme.TEXT_MUTED, font=theme.font_bold(11), anchor="w").pack(fill="x", padx=16, pady=(0, 10))
+            self._metric_values[key] = value
+
+        toolbar = ctk.CTkFrame(self._results_view, fg_color="transparent")
+        toolbar.pack(fill="x", padx=24, pady=(0, 10))
+        self._search = ctk.CTkEntry(
+            toolbar, placeholder_text="Search switch, port, VLAN, MAC or description…",
+            font=theme.font_body(13), height=38, fg_color=theme.PANEL_BG,
+            border_color=theme.SEPARATOR,
+        )
+        self._search.pack(side="left", fill="x", expand=True, padx=(0, 12))
+        self._search.bind("<KeyRelease>", self._schedule_filter)
+        self._link_filter = ctk.CTkOptionMenu(
+            toolbar, values=["All ports", "Up", "Down", "Disabled"], width=132, height=38,
+            font=theme.font_body(13), fg_color=theme.NAV_INACTIVE_BG,
+            button_color=theme.SEPARATOR, button_hover_color=theme.NAV_ACTIVE_BG,
+            command=lambda value: self._refresh_results(),
+        )
+        self._table_area = ctk.CTkFrame(self._results_view, fg_color=theme.PANEL_BG, corner_radius=10)
+        self._table_area.pack(fill="both", expand=True, padx=24, pady=(0, 12))
+        self._results_table = ResultsTable(self._table_area)
+        self._results_table.pack(fill="both", expand=True)
+        self._link_filter.pack(side="right")
+
+        self._empty_state = ctk.CTkFrame(self._table_area, fg_color=theme.PANEL_BG, corner_radius=10)
+        self._empty_title = ctk.CTkLabel(self._empty_state, text="Your network, at a glance", font=theme.font_heading(22), text_color=theme.TEXT_PRIMARY)
+        self._empty_title.pack(pady=(0, 10))
+        self._empty_description = ctk.CTkLabel(
+            self._empty_state,
+            text="1  Add your switches and choose their vendors.\n2  Set credentials, then start polling.\n3  Review your ports and export an Excel workbook.",
+            font=theme.font_body(14), text_color=theme.TEXT_MUTED,
+            justify="left", wraplength=440,
+        )
+        self._empty_description.pack()
+        self._empty_state.place(relx=0.5, rely=0.5, anchor="center")
+
+        footer = ctk.CTkFrame(self._results_view, fg_color="transparent")
+        # Reserve the footer before the expanding table so export stays
+        # reachable even when the window is reduced to its minimum height.
+        footer.pack(side="bottom", fill="x", padx=24, pady=(0, 20), before=self._table_area)
+        self._results_caption = ctk.CTkLabel(
+            footer, text="Ready for your first poll", anchor="w",
+            font=theme.font_body(12), text_color=theme.TEXT_MUTED,
+        )
+        self._results_caption.pack(side="left", fill="x", expand=True)
 
         self._export_btn = ctk.CTkButton(
-            self._results_view,
+            footer,
             text="Export to Excel",
-            height=36,
+            height=40,
+            width=160,
             font=theme.font_bold(13),
             fg_color=theme.EXPORT_BTN_BG,
             hover_color=theme.EXPORT_BTN_HOVER,
@@ -114,7 +194,7 @@ class PintLiveApp(ctk.CTk):
             state="disabled",
             command=self._export,
         )
-        self._export_btn.pack(fill="x", padx=12, pady=(0, 12))
+        self._export_btn.pack(side="right", padx=(12, 0), before=self._results_caption)
 
         # About view
         self._about_view = AboutPanel(self._content)
@@ -132,6 +212,45 @@ class PintLiveApp(ctk.CTk):
 
     # ── Polling ────────────────────────────────────────────────────────────
 
+    def _focus_search(self, event=None):
+        self._navigate("poll")
+        self._search.focus_set()
+        self._search.select_range(0, "end")
+        return "break"
+
+    def _schedule_filter(self, event=None) -> None:
+        if self._search_after is not None:
+            self.after_cancel(self._search_after)
+        self._search_after = self.after(180, self._refresh_results)
+
+    def _refresh_results(self) -> None:
+        if self._search_after is not None:
+            self.after_cancel(self._search_after)
+        self._search_after = None
+        if self._polling:
+            return
+        shown = self._results_table.populate(
+            self._poll_results, self._search.get(), self._link_filter.get(),
+        )
+        total = sum(len(switch.interfaces) for switch in self._poll_results)
+        self._results_caption.configure(text=f"{shown:,} of {total:,} ports shown · Export includes all results")
+        if shown:
+            self._empty_state.place_forget()
+        elif self._poll_results:
+            self._empty_title.configure(text="No matching ports")
+            self._empty_description.configure(text="Try a different search or choose All ports.")
+            self._empty_state.place(relx=0.5, rely=0.5, anchor="center")
+
+    def _update_metrics(self) -> None:
+        values = {
+            "switches": len(self._poll_results),
+            "ports": sum(len(s.interfaces) for s in self._poll_results),
+            "up": sum(i.link.lower() == "up" for s in self._poll_results for i in s.interfaces),
+            "macs": sum(len(s.mac_table) for s in self._poll_results),
+        }
+        for key, value in values.items():
+            self._metric_values[key].configure(text=f"{value:,}")
+
     def _start_poll(self, config: dict) -> None:
         """
         Called by the sidebar when the user clicks Poll Switches.
@@ -139,6 +258,7 @@ class PintLiveApp(ctk.CTk):
         we resolve device_type/collector/parser per switch here.
         """
         protocol = config["protocol"]
+        self._polling = True
 
         self._stop_event.clear()
 
@@ -148,6 +268,13 @@ class PintLiveApp(ctk.CTk):
         self._export_btn.configure(state="disabled")
         self._results_table.clear()
         self._poll_results = []
+        self._search.delete(0, "end")
+        self._link_filter.set("All ports")
+        self._update_metrics()
+        self._empty_title.configure(text="Discovering your network…")
+        self._empty_description.configure(text="Results appear when polling finishes.\nYou can stop at any time and keep completed switches.")
+        self._empty_state.place(relx=0.5, rely=0.5, anchor="center")
+        self._results_caption.configure(text="Polling in progress")
         self._navigate("poll")
 
         # Build a per-switch job list the worker can iterate over without
@@ -300,11 +427,13 @@ class PintLiveApp(ctk.CTk):
         errors: list[tuple[str, str]],
         stopped: bool = False,
     ) -> None:
+        self._polling = False
         self._sidebar.set_busy(False)
         self._poll_results = results
+        self._update_metrics()
 
         if results:
-            self._results_table.populate(results)
+            self._refresh_results()
             self._export_btn.configure(state="normal")
             summary = (
                 f"Stopped — {len(results)} switch(es) completed"
@@ -319,6 +448,9 @@ class PintLiveApp(ctk.CTk):
                 if stopped else "No data collected — check IPs and credentials."
             )
             self._sidebar.set_status(message, theme.WARNING if stopped else theme.LINK_DOWN)
+            self._empty_title.configure(text="Poll stopped" if stopped else "No data collected")
+            self._empty_description.configure(text=message)
+            self._results_caption.configure(text="No results to export")
 
         if errors:
             error_text = "\n".join(f"• {host}: {msg}" for host, msg in errors)
@@ -330,7 +462,7 @@ class PintLiveApp(ctk.CTk):
         """Push the current ARP table into widgets that render it."""
         self._results_table.set_arp_table(table)
         if self._poll_results:
-            self._results_table.populate(self._poll_results)
+            self._refresh_results()
 
     def _load_arp_file(self) -> ArpTable | None:
         """Prompt for one or more ARP .xlsx files and append them to the
@@ -391,7 +523,7 @@ class PintLiveApp(ctk.CTk):
     # ── Export ─────────────────────────────────────────────────────────────
 
     def _export(self) -> None:
-        if not self._poll_results:
+        if self._polling or not self._poll_results:
             return
 
         arp_table = self._resolve_arp_for_export()

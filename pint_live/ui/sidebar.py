@@ -2,14 +2,16 @@
 PiNT Live — sidebar widget.
 
 The left-hand panel contains:
-  • The PiNT Live logo
-  • The switch IP list (each row has its own cog button for per-switch config)
-  • A "Configure all switches…" button that opens the bulk config modal
+  • A compact PiNT Live heading
+  • The switch IP list (each row has an Edit button for per-switch config)
+  • A "Credentials & vendors…" button that opens the bulk config modal
   • The protocol toggle (SSH / Telnet)
   • The optional ARP-list block (Load ARP List(s)… / Clear / status)
-  • The Poll Switches button
+  • Persistent Poll Switches and Stop controls
   • A progress bar + status label
   • Navigation buttons at the bottom
+
+Settings scroll independently, keeping run controls and status visible.
 
 Per-switch vendor and credentials live on each _SwitchRow.  Shared
 credentials live on the Sidebar.  The bulk modal and the per-row cog
@@ -30,11 +32,32 @@ import tkinter as tk
 import customtkinter as ctk
 
 from pint_live.ui import theme
-from pint_live.ui import assets
 from pint_live.vendors import REGISTRY as VENDORS
 
 
 DEFAULT_VENDOR = "Ruckus"
+
+
+def _present_modal(dialog, parent, width: int, height: int, focus=None) -> None:
+    """Size and centre a dialog using CTk's own DPI scaling on either platform."""
+    dialog.geometry(f"{width}x{height}")
+    dialog.transient(parent.winfo_toplevel())
+    dialog.bind("<Escape>", lambda event: dialog.destroy())
+    dialog.bind("<Return>", lambda event: dialog._save_and_close())
+
+    def present() -> None:
+        if not dialog.winfo_exists():
+            return
+        dialog.update_idletasks()
+        owner = parent.winfo_toplevel()
+        x = max(0, owner.winfo_rootx() + (owner.winfo_width() - dialog.winfo_width()) // 2)
+        y = max(0, owner.winfo_rooty() + (owner.winfo_height() - dialog.winfo_height()) // 2)
+        dialog.geometry(f"+{x}+{y}")
+        dialog.lift()
+        dialog.grab_set()
+        (focus or dialog).focus_set()
+
+    dialog.after(50, present)
 
 
 # ── Switch-IP row ──────────────────────────────────────────────────────────
@@ -63,33 +86,30 @@ class _SwitchRow(ctk.CTkFrame):
         self.username: str = ""
         self.password: str = ""
 
+        self.grid_columnconfigure(0, weight=1)
         self.entry = ctk.CTkEntry(
-            self,
-            placeholder_text="e.g. 192.168.1.1",
-            width=150,
-            font=theme.font_body(11),
+            self, placeholder_text="IP address or hostname", width=150, height=34,
+            font=theme.font_body(),
         )
-        self.entry.pack(side="left", padx=(0, 4))
-
+        self.entry.grid(row=0, column=0, sticky="ew", padx=(0, 6))
         ctk.CTkButton(
-            self,
-            text="⚙",     # gear glyph
-            width=28, height=28,
-            fg_color=theme.NAV_INACTIVE_BG,
-            hover_color=theme.NAV_ACTIVE_BG,
-            font=theme.font_symbol(15),
-            command=on_configure,
-        ).pack(side="left", padx=(0, 4))
-
+            self, text="Edit", width=44, height=34,
+            fg_color=theme.NAV_INACTIVE_BG, hover_color=theme.NAV_ACTIVE_BG,
+            font=theme.font_body(14), command=on_configure,
+        ).grid(row=0, column=1, padx=(0, 6))
         ctk.CTkButton(
-            self,
-            text="−",     # minus sign
-            width=28, height=28,
-            fg_color=theme.REMOVE_BTN_BG,
-            hover_color=theme.REMOVE_BTN_HOVER,
-            font=theme.font_bold(12),
-            command=on_remove,
-        ).pack(side="left")
+            self, text="−", width=30, height=34,
+            fg_color=theme.NAV_INACTIVE_BG, hover_color=theme.REMOVE_BTN_HOVER,
+            text_color=theme.TEXT_MUTED, font=theme.font_bold(16), command=on_remove,
+        ).grid(row=0, column=2)
+        self._vendor_label = ctk.CTkLabel(
+            self, text=self.vendor, height=20, anchor="w",
+            text_color=theme.TEXT_MUTED, font=theme.font_body(13),
+        )
+        self._vendor_label.grid(row=1, column=0, sticky="w", padx=3)
+
+    def refresh_vendor(self) -> None:
+        self._vendor_label.configure(text=self.vendor)
 
     @property
     def ip(self) -> str:
@@ -100,7 +120,7 @@ class _SwitchRow(ctk.CTkFrame):
 
 class _SwitchConfigPopup(ctk.CTkToplevel):
     """
-    Small modal opened when the user clicks the cog next to one IP.
+    Small modal opened when the user clicks Edit next to one IP.
     Lets them pick a vendor and (if not using shared creds) enter
     per-switch credentials.  Changes are written back to the row on Save.
     """
@@ -113,8 +133,6 @@ class _SwitchConfigPopup(ctk.CTkToplevel):
         self.title(f"Configure {ip_label}")
         self.configure(fg_color=theme.SIDEBAR_BG)
         self.resizable(False, False)
-        self.transient(master.winfo_toplevel())
-        self.grab_set()
 
         body = ctk.CTkFrame(self, fg_color=theme.SIDEBAR_BG)
         body.pack(fill="both", expand=True, padx=18, pady=14)
@@ -124,7 +142,7 @@ class _SwitchConfigPopup(ctk.CTkToplevel):
             text=f"Switch: {ip_label}",
             fg_color="transparent",
             text_color=theme.TEXT_PRIMARY,
-            font=theme.font_bold(12),
+            font=theme.font_bold(14),
             anchor="w",
         ).pack(fill="x", pady=(0, 10))
 
@@ -134,7 +152,7 @@ class _SwitchConfigPopup(ctk.CTkToplevel):
             text="Vendor",
             fg_color="transparent",
             text_color=theme.TEXT_MUTED,
-            font=theme.font_bold(11),
+            font=theme.font_bold(13),
             anchor="w",
         ).pack(fill="x", pady=(0, 2))
 
@@ -143,11 +161,11 @@ class _SwitchConfigPopup(ctk.CTkToplevel):
             body,
             values=list(VENDORS.keys()),
             variable=self._vendor_var,
-            width=220,
+            width=280,
             fg_color=theme.VENDOR_INACTIVE_BG,
             button_color=theme.VENDOR_ACTIVE_BG,
             button_hover_color=theme.VENDOR_HOVER,
-            font=theme.font_body(11),
+            font=theme.font_body(13),
         ).pack(anchor="w", pady=(0, 10))
 
         # Credentials
@@ -156,7 +174,7 @@ class _SwitchConfigPopup(ctk.CTkToplevel):
             text="Credentials",
             fg_color="transparent",
             text_color=theme.TEXT_MUTED,
-            font=theme.font_bold(11),
+            font=theme.font_bold(13),
             anchor="w",
         ).pack(fill="x", pady=(0, 2))
 
@@ -165,14 +183,15 @@ class _SwitchConfigPopup(ctk.CTkToplevel):
                 body,
                 text=(
                     "Using shared credentials.\n"
-                    "Open “Configure all switches…” and uncheck\n"
+                    "Open “Credentials & vendors…” and uncheck\n"
                     "“Use same credentials for all” to override per switch."
                 ),
                 fg_color="transparent",
                 text_color=theme.TEXT_DIM,
-                font=theme.font_body(10),
+                font=theme.font_body(12),
                 justify="left",
                 anchor="w",
+                wraplength=375,
             ).pack(fill="x", pady=(0, 10))
             self._username_entry = None
             self._password_entry = None
@@ -182,12 +201,12 @@ class _SwitchConfigPopup(ctk.CTkToplevel):
                 text="Username",
                 fg_color="transparent",
                 text_color=theme.TEXT_MUTED,
-                font=theme.font_body(10),
+                font=theme.font_body(12),
                 anchor="w",
             ).pack(fill="x")
             self._username_entry = ctk.CTkEntry(
-                body, width=220, font=theme.font_body(11),
-                placeholder_text="(falls back to shared if blank)",
+                body, width=280, font=theme.font_body(13),
+                placeholder_text="Use shared when blank",
             )
             self._username_entry.insert(0, row.username)
             self._username_entry.pack(anchor="w", pady=(0, 6))
@@ -197,12 +216,12 @@ class _SwitchConfigPopup(ctk.CTkToplevel):
                 text="Password",
                 fg_color="transparent",
                 text_color=theme.TEXT_MUTED,
-                font=theme.font_body(10),
+                font=theme.font_body(12),
                 anchor="w",
             ).pack(fill="x")
             self._password_entry = ctk.CTkEntry(
-                body, width=220, show="●", font=theme.font_body(11),
-                placeholder_text="(falls back to shared if blank)",
+                body, width=280, show="●", font=theme.font_body(13),
+                placeholder_text="Use shared when blank",
             )
             self._password_entry.insert(0, row.password)
             self._password_entry.pack(anchor="w", pady=(0, 10))
@@ -215,21 +234,24 @@ class _SwitchConfigPopup(ctk.CTkToplevel):
             width=90, height=30,
             fg_color=theme.NAV_INACTIVE_BG,
             hover_color=theme.NAV_ACTIVE_BG,
-            font=theme.font_body(11),
+            font=theme.font_body(13),
             command=self.destroy,
-        ).pack(side="right", padx=(6, 0))
+        ).pack(side="left")
         ctk.CTkButton(
             btn_row,
             text="Save",
             width=90, height=30,
             fg_color=theme.POLL_BTN_BG,
             hover_color=theme.POLL_BTN_HOVER,
-            font=theme.font_bold(11),
+            font=theme.font_bold(13),
             command=self._save_and_close,
         ).pack(side="right")
 
+        _present_modal(self, master, 430, 410, self._username_entry)
+
     def _save_and_close(self) -> None:
         self._row.vendor = self._vendor_var.get()
+        self._row.refresh_vendor()
         if self._username_entry is not None:
             self._row.username = self._username_entry.get().strip()
         if self._password_entry is not None:
@@ -241,7 +263,7 @@ class _SwitchConfigPopup(ctk.CTkToplevel):
 
 class _BulkConfigDialog(ctk.CTkToplevel):
     """
-    Modal opened by the "Configure all switches…" button.
+    Modal opened by the "Credentials & vendors…" button.
 
     Shows the shared username/password fields at the top, then a table
     with one row per switch (IP | vendor | username | password).
@@ -254,19 +276,21 @@ class _BulkConfigDialog(ctk.CTkToplevel):
         self._sidebar = sidebar
         self._row_widgets: list[dict] = []
 
-        self.title("Configure All Switches")
+        self.title("Credentials & Vendors")
         self.configure(fg_color=theme.SIDEBAR_BG)
         self.resizable(True, True)
-        self.minsize(620, 400)
-        self.transient(master.winfo_toplevel())
-        self.grab_set()
+        self.minsize(730, 460)
 
         self._build()
         self._apply_shared_state()
+        _present_modal(self, master, 780, 570, self._shared_user_entry)
 
     def _build(self) -> None:
         body = ctk.CTkFrame(self, fg_color=theme.SIDEBAR_BG)
         body.pack(fill="both", expand=True, padx=18, pady=14)
+        # Reserve the actions before allocating the resizable switch table.
+        footer = ctk.CTkFrame(body, fg_color="transparent")
+        footer.pack(side="bottom", fill="x", pady=(8, 0))
 
         # ── Shared credentials block ────────────────────────────────────
         ctk.CTkLabel(
@@ -274,7 +298,7 @@ class _BulkConfigDialog(ctk.CTkToplevel):
             text="Shared credentials",
             fg_color="transparent",
             text_color=theme.ACCENT,
-            font=theme.font_bold(12),
+            font=theme.font_bold(14),
             anchor="w",
         ).pack(fill="x", pady=(0, 4))
 
@@ -283,10 +307,10 @@ class _BulkConfigDialog(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             shared, text="Username", width=80, anchor="w",
-            text_color=theme.TEXT_MUTED, font=theme.font_body(11),
+            text_color=theme.TEXT_MUTED, font=theme.font_body(13),
         ).grid(row=0, column=0, sticky="w", pady=2)
         self._shared_user_entry = ctk.CTkEntry(
-            shared, width=220, font=theme.font_body(11),
+            shared, width=280, font=theme.font_body(13),
             placeholder_text="admin",
         )
         self._shared_user_entry.insert(0, self._sidebar.shared_username)
@@ -294,10 +318,10 @@ class _BulkConfigDialog(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             shared, text="Password", width=80, anchor="w",
-            text_color=theme.TEXT_MUTED, font=theme.font_body(11),
+            text_color=theme.TEXT_MUTED, font=theme.font_body(13),
         ).grid(row=1, column=0, sticky="w", pady=2)
         self._shared_pass_entry = ctk.CTkEntry(
-            shared, width=220, show="●", font=theme.font_body(11),
+            shared, width=280, show="●", font=theme.font_body(13),
         )
         self._shared_pass_entry.insert(0, self._sidebar.shared_password)
         self._shared_pass_entry.grid(row=1, column=1, sticky="w", padx=(6, 0), pady=2)
@@ -308,7 +332,7 @@ class _BulkConfigDialog(ctk.CTkToplevel):
             text="Use same credentials for all switches",
             variable=self._use_shared_var,
             command=self._apply_shared_state,
-            font=theme.font_body(11),
+            font=theme.font_body(13),
             text_color=theme.TEXT_PRIMARY,
         ).pack(anchor="w", pady=(6, 8))
 
@@ -320,7 +344,7 @@ class _BulkConfigDialog(ctk.CTkToplevel):
             text="Per-switch configuration",
             fg_color="transparent",
             text_color=theme.ACCENT,
-            font=theme.font_bold(12),
+            font=theme.font_bold(14),
             anchor="w",
         ).pack(fill="x", pady=(0, 4))
 
@@ -334,7 +358,7 @@ class _BulkConfigDialog(ctk.CTkToplevel):
         ]):
             ctk.CTkLabel(
                 header, text=text, width=width, anchor="w",
-                text_color=theme.TEXT_MUTED, font=theme.font_bold(10),
+                text_color=theme.TEXT_MUTED, font=theme.font_bold(12),
             ).grid(row=0, column=col, sticky="w", padx=(0, 6))
 
         table = ctk.CTkScrollableFrame(
@@ -346,24 +370,22 @@ class _BulkConfigDialog(ctk.CTkToplevel):
             self._add_table_row(table, row)
 
         # ── Footer buttons ──────────────────────────────────────────────
-        footer = ctk.CTkFrame(body, fg_color="transparent")
-        footer.pack(fill="x")
         ctk.CTkButton(
             footer,
             text="Cancel",
             width=90, height=30,
             fg_color=theme.NAV_INACTIVE_BG,
             hover_color=theme.NAV_ACTIVE_BG,
-            font=theme.font_body(11),
+            font=theme.font_body(13),
             command=self.destroy,
-        ).pack(side="right", padx=(6, 0))
+        ).pack(side="left")
         ctk.CTkButton(
             footer,
             text="Save",
             width=90, height=30,
             fg_color=theme.POLL_BTN_BG,
             hover_color=theme.POLL_BTN_HOVER,
-            font=theme.font_bold(11),
+            font=theme.font_bold(13),
             command=self._save_and_close,
         ).pack(side="right")
 
@@ -374,7 +396,7 @@ class _BulkConfigDialog(ctk.CTkToplevel):
         ip_text = row.ip or "(no IP yet)"
         ctk.CTkLabel(
             line, text=ip_text, width=150, anchor="w",
-            text_color=theme.TEXT_PRIMARY, font=theme.font_body(11),
+            text_color=theme.TEXT_PRIMARY, font=theme.font_body(13),
         ).grid(row=0, column=0, sticky="w", padx=(4, 6))
 
         vendor_var = tk.StringVar(value=row.vendor)
@@ -386,16 +408,16 @@ class _BulkConfigDialog(ctk.CTkToplevel):
             fg_color=theme.VENDOR_INACTIVE_BG,
             button_color=theme.VENDOR_ACTIVE_BG,
             button_hover_color=theme.VENDOR_HOVER,
-            font=theme.font_body(11),
+            font=theme.font_body(13),
         )
         vendor_menu.grid(row=0, column=1, sticky="w", padx=(0, 6))
 
-        user_entry = ctk.CTkEntry(line, width=150, font=theme.font_body(11))
+        user_entry = ctk.CTkEntry(line, width=150, font=theme.font_body(13))
         user_entry.insert(0, row.username)
         user_entry.grid(row=0, column=2, sticky="w", padx=(0, 6))
 
         pass_entry = ctk.CTkEntry(
-            line, width=150, show="●", font=theme.font_body(11),
+            line, width=150, show="●", font=theme.font_body(13),
         )
         pass_entry.insert(0, row.password)
         pass_entry.grid(row=0, column=3, sticky="w", padx=(0, 4))
@@ -422,377 +444,257 @@ class _BulkConfigDialog(ctk.CTkToplevel):
         for w in self._row_widgets:
             row = w["row"]
             row.vendor   = w["vendor_var"].get()
+            row.refresh_vendor()
             row.username = w["user_entry"].get().strip()
             row.password = w["pass_entry"].get()
 
+        self._sidebar._refresh_credentials_status()
         self.destroy()
 
 
 # ── Sidebar ────────────────────────────────────────────────────────────────
 
-class Sidebar(ctk.CTkScrollableFrame):
-    """
-    Left sidebar.
-
-    Instantiate, then set the callbacks before the mainloop starts:
-        sidebar.on_poll_requested = my_poll_handler
-        sidebar.on_navigate       = my_navigate_handler
-        sidebar.on_arp_load       = my_arp_load_handler
-        sidebar.on_arp_clear      = my_arp_clear_handler
-    """
+class Sidebar(ctk.CTkFrame):
+    """Scrollable setup with persistent run controls, progress and navigation."""
 
     def __init__(self, master, **kwargs):
         kwargs.setdefault("fg_color", theme.SIDEBAR_BG)
         kwargs.setdefault("corner_radius", 0)
         kwargs.setdefault("width", theme.SIDEBAR_W)
-        kwargs.setdefault("scrollbar_button_color", theme.SEPARATOR)
-        kwargs.setdefault("scrollbar_button_hover_color", theme.ACCENT_HOVER)
         super().__init__(master, **kwargs)
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1)
+        self.grid_propagate(False)
 
-        # Callbacks — assign these after construction
         self.on_poll_requested: callable = lambda cfg: None
-        self.on_navigate:       callable = lambda key: None
-        self.on_arp_load:       callable = lambda: None
-        self.on_arp_clear:      callable = lambda: None
+        self.on_navigate: callable = lambda key: None
+        self.on_arp_load: callable = lambda: None
+        self.on_arp_clear: callable = lambda: None
         self.on_stop_requested: callable = lambda: None
-
-        # Internal state
         self._switch_rows: list[_SwitchRow] = []
-        self._protocol  = tk.StringVar(value="SSH")
+        self._protocol = tk.StringVar(value="SSH")
         self._include_raw_outputs = tk.BooleanVar(value=False)
         self._nav_buttons: dict[str, ctk.CTkButton] = {}
-
-        # Shared credential state (lives on the sidebar, edited via bulk modal)
-        self.shared_username:  str  = ""
-        self.shared_password:  str  = ""
+        self.shared_username: str = ""
+        self.shared_password: str = ""
         self.use_shared_creds: bool = True
-
         self._build()
-        self._add_switch_row()   # start with one empty IP row
-
-    # ── Public interface ───────────────────────────────────────────────────
+        self._add_switch_row()
 
     @property
     def switch_rows(self) -> list[_SwitchRow]:
-        """Used by the bulk-config modal to enumerate switches."""
         return list(self._switch_rows)
 
     @property
     def include_raw_outputs(self) -> bool:
-        """Whether Excel exports should include sensitive raw CLI output."""
         return self._include_raw_outputs.get()
 
     def set_busy(self, busy: bool) -> None:
-        """Toggle the Poll and Stop controls for a poll run."""
         self._poll_btn.configure(
             state="disabled" if busy else "normal",
-            text="Polling…" if busy else "Poll Switches",
+            text="Polling…" if busy else "Poll switches",
         )
-        self._stop_btn.configure(
-            state="normal" if busy else "disabled",
-            text="Stop",
-        )
+        self._stop_btn.configure(state="normal" if busy else "disabled", text="Stop")
 
     def set_stop_requested(self) -> None:
-        """Prevent repeat Stop clicks while cancellation is pending."""
         self._stop_btn.configure(state="disabled", text="Stopping…")
 
     def set_status(self, text: str, colour: str = theme.TEXT_MUTED) -> None:
-        """Update the status label below the progress bar."""
         self._status_label.configure(text=text, text_color=colour)
 
     def set_progress(self, value: float) -> None:
-        """Set the progress bar (0.0 – 1.0)."""
         self._progress_bar.set(value)
 
     def set_arp_status(self, text: str, *, loaded: bool) -> None:
-        """Update the ARP-list status line and show/hide the clear button."""
-        colour = theme.LINK_UP if loaded else theme.TEXT_MUTED
-        self._arp_label.configure(text=text, text_color=colour)
+        self._arp_label.configure(text=text, text_color=theme.LINK_UP if loaded else theme.TEXT_MUTED)
         if loaded:
             self._arp_clear_btn.pack(side="left", padx=(6, 0))
         else:
             self._arp_clear_btn.pack_forget()
 
     def set_nav_active(self, key: str) -> None:
-        """Highlight the active navigation button."""
         for k, btn in self._nav_buttons.items():
-            if k == key:
-                btn.configure(text_color=theme.ACCENT, fg_color=theme.NAV_ACTIVE_BG)
-            else:
-                btn.configure(text_color=theme.TEXT_MUTED, fg_color=theme.NAV_INACTIVE_BG)
-
-    # ── Build ──────────────────────────────────────────────────────────────
+            btn.configure(
+                text_color=theme.ACCENT if k == key else theme.TEXT_MUTED,
+                fg_color=theme.NAV_ACTIVE_BG if k == key else theme.NAV_INACTIVE_BG,
+            )
 
     def _build(self) -> None:
-        tk.Frame(self, bg=theme.SIDEBAR_BG, height=8).pack(fill="x")
+        header = ctk.CTkFrame(self, fg_color="transparent")
+        header.grid(row=0, column=0, sticky="ew", padx=20, pady=(22, 16))
+        ctk.CTkLabel(
+            header, text="PiNT Live", anchor="w", font=theme.font_heading(26),
+            text_color=theme.TEXT_PRIMARY,
+        ).pack(fill="x")
+        ctk.CTkLabel(
+            header, text="NETWORK DOCUMENTATION", anchor="w",
+            font=theme.font_bold(10), text_color=theme.ACCENT,
+        ).pack(fill="x", pady=(0, 2))
 
-        self._add_logo()
-        theme.separator(self, pady=(4, 8))
+        self._settings = ctk.CTkScrollableFrame(
+            self, fg_color="transparent", corner_radius=0,
+            scrollbar_button_color=theme.SEPARATOR,
+            scrollbar_button_hover_color=theme.ACCENT_HOVER,
+        )
+        self._settings.grid(row=1, column=0, sticky="nsew", padx=(8, 4))
         self._add_switch_ip_section()
-        theme.separator(self, pady=(6, 6))
+        self._add_credentials_section()
         self._add_protocol_section()
-        theme.separator(self, pady=(6, 6))
         self._add_arp_section()
         self._add_export_options_section()
+
+        self._controls = ctk.CTkFrame(self, fg_color=theme.SIDEBAR_BG, corner_radius=0)
+        self._controls.grid(row=2, column=0, sticky="ew", padx=16, pady=(8, 14))
+        theme.separator(self._controls, padx=0, pady=(0, 12))
         self._add_poll_button()
         self._add_status_area()
-
-        # Spacer pushes nav buttons to the bottom
-        ctk.CTkFrame(self, fg_color=theme.SIDEBAR_BG, corner_radius=0).pack(
-            fill="both", expand=True
-        )
-        theme.separator(self, pady=(6, 4))
         self._add_nav_buttons()
-        theme.separator(self, pady=(4, 2))
-        tk.Frame(self, bg=theme.SIDEBAR_BG, height=8).pack(fill="x")
 
-    def _add_logo(self) -> None:
-        logo = assets.load_image_fit_width(
-            "PiNT_InAppLogo.png",
-            width=theme.SIDEBAR_W - 24,
+    def _section(self, title: str, *, first: bool = False) -> None:
+        ctk.CTkLabel(
+            self._settings, text=title, anchor="w", font=theme.font_bold(13),
+            text_color=theme.TEXT_PRIMARY,
+        ).pack(fill="x", padx=8, pady=(0 if first else 18, 6))
+
+    def _hint(self, text: str):
+        label = ctk.CTkLabel(
+            self._settings, text=text, anchor="w", justify="left",
+            wraplength=theme.SIDEBAR_W - 52, font=theme.font_body(12),
+            text_color=theme.TEXT_MUTED,
         )
-        if logo:
-            ctk.CTkLabel(
-                self, image=logo, text="", fg_color="transparent"
-            ).pack(padx=12, pady=(0, 6))
-        else:
-            ctk.CTkLabel(
-                self,
-                text="PiNT Live",
-                fg_color="transparent",
-                text_color=theme.ACCENT,
-                font=theme.font_heading(16),
-            ).pack(pady=(6, 6))
+        label.pack(fill="x", padx=8, pady=(2, 3))
+        return label
 
     def _add_switch_ip_section(self) -> None:
-        ctk.CTkLabel(
-            self,
-            text="Switches",
-            fg_color="transparent",
-            text_color=theme.TEXT_MUTED,
-            font=theme.font_bold(11),
-            anchor="w",
-        ).pack(fill="x", padx=14)
-
-        ctk.CTkLabel(
-            self,
-            text="Click ⚙ to set vendor / per-switch credentials",
-            fg_color="transparent",
-            text_color=theme.TEXT_DIM,
-            font=theme.font_body(9),
-            anchor="w",
-        ).pack(fill="x", padx=14, pady=(0, 2))
-
-        # Container for the IP rows
-        self._switches_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self._switches_frame.pack(fill="x", padx=14, pady=(2, 0))
-
-        button_row = ctk.CTkFrame(self, fg_color="transparent")
-        button_row.pack(fill="x", padx=14, pady=(4, 0))
-
+        self._section("1   Add your switches", first=True)
+        self._switches_frame = ctk.CTkFrame(self._settings, fg_color="transparent")
+        self._switches_frame.pack(fill="x", padx=8)
         ctk.CTkButton(
-            button_row,
-            text="+ Add Switch",
-            width=110, height=26,
-            font=theme.font_body(11),
-            fg_color=theme.NAV_INACTIVE_BG,
-            hover_color=theme.NAV_ACTIVE_BG,
-            command=self._add_switch_row,
-        ).pack(side="left")
+            self._settings, text="+ Add switch", height=32,
+            font=theme.font_body(), fg_color=theme.NAV_INACTIVE_BG,
+            hover_color=theme.NAV_ACTIVE_BG, command=self._add_switch_row,
+        ).pack(fill="x", padx=8, pady=(6, 0))
 
+    def _add_credentials_section(self) -> None:
+        self._section("2   Set credentials & vendors")
         ctk.CTkButton(
-            self,
-            text="Configure all switches…",
-            height=28,
-            font=theme.font_bold(11),
-            fg_color=theme.VENDOR_INACTIVE_BG,
-            hover_color=theme.VENDOR_HOVER,
-            command=self._open_bulk_config,
-        ).pack(fill="x", padx=14, pady=(6, 0))
+            self._settings, text="Credentials & vendors…", height=36,
+            font=theme.font_bold(13), fg_color=theme.VENDOR_INACTIVE_BG,
+            hover_color=theme.VENDOR_HOVER, command=self._open_bulk_config,
+        ).pack(fill="x", padx=8)
+        self._credentials_label = self._hint("Add a username and password to connect.")
+
+    def _refresh_credentials_status(self) -> None:
+        if self.use_shared_creds:
+            configured = bool(self.shared_username and self.shared_password)
+            text = "Shared credentials ready." if configured else "Add a username and password to connect."
+        else:
+            active_rows = [row for row in self._switch_rows if row.ip]
+            configured = bool(active_rows) and all(
+                (row.username or self.shared_username) and (row.password or self.shared_password)
+                for row in active_rows
+            )
+            text = "Per-switch credentials ready." if configured else "Some switches still need credentials."
+        self._credentials_label.configure(
+            text=text, text_color=theme.LINK_UP if configured else theme.TEXT_MUTED,
+        )
 
     def _add_protocol_section(self) -> None:
-        ctk.CTkLabel(
-            self,
-            text="Protocol",
-            fg_color="transparent",
-            text_color=theme.TEXT_MUTED,
-            font=theme.font_bold(11),
-            anchor="w",
-        ).pack(fill="x", padx=14)
-
-        row = ctk.CTkFrame(self, fg_color="transparent")
-        row.pack(anchor="w", padx=14, pady=(4, 0))
-
+        self._section("3   Choose a connection")
+        row = ctk.CTkFrame(self._settings, fg_color="transparent")
+        row.pack(fill="x", padx=8)
         self._ssh_btn = ctk.CTkButton(
-            row,
-            text="SSH",
-            width=74, height=28,
-            font=theme.font_bold(11),
-            fg_color=theme.PROTO_ACTIVE_SSH,
-            command=lambda: self._select_protocol("SSH"),
+            row, text="SSH", width=115, height=32, font=theme.font_bold(13),
+            fg_color=theme.PROTO_ACTIVE_SSH, command=lambda: self._select_protocol("SSH"),
         )
-        self._ssh_btn.pack(side="left", padx=(0, 6))
-
+        self._ssh_btn.pack(side="left", fill="x", expand=True, padx=(0, 6))
         self._telnet_btn = ctk.CTkButton(
-            row,
-            text="Telnet",
-            width=74, height=28,
-            font=theme.font_bold(11),
-            fg_color=theme.PROTO_INACTIVE,
-            hover_color="#6c757d",
+            row, text="Telnet", width=115, height=32, font=theme.font_bold(13),
+            fg_color=theme.PROTO_INACTIVE, hover_color=theme.NAV_ACTIVE_BG,
             command=lambda: self._select_protocol("Telnet"),
         )
-        self._telnet_btn.pack(side="left", padx=(0, 8))
-
-        ctk.CTkLabel(
-            row,
-            text="⚠ Unencrypted",
-            fg_color="transparent",
-            text_color=theme.WARNING,
-            font=theme.font_body(10),
-        ).pack(side="left")
+        self._telnet_btn.pack(side="left", fill="x", expand=True)
+        self._hint("SSH is recommended. Telnet is unencrypted.")
 
     def _add_arp_section(self) -> None:
-        ctk.CTkLabel(
-            self,
-            text="ARP Lists (optional)",
-            fg_color="transparent",
-            text_color=theme.TEXT_MUTED,
-            font=theme.font_bold(11),
-            anchor="w",
-        ).pack(fill="x", padx=14)
-
-        row = ctk.CTkFrame(self, fg_color="transparent")
-        row.pack(fill="x", padx=14, pady=(4, 0))
-
+        self._section("Enrich your results  ·  optional")
+        self._hint("Match MAC addresses to IPs and hostnames with an ARP workbook.")
+        row = ctk.CTkFrame(self._settings, fg_color="transparent")
+        row.pack(fill="x", padx=8, pady=(4, 0))
         ctk.CTkButton(
-            row,
-            text="Load ARP List(s)…",
-            width=140, height=26,
-            font=theme.font_body(11),
-            fg_color=theme.NAV_INACTIVE_BG,
-            hover_color=theme.NAV_ACTIVE_BG,
-            command=lambda: self.on_arp_load(),
+            row, text="Load ARP lists…", width=165, height=32,
+            font=theme.font_body(), fg_color=theme.NAV_INACTIVE_BG,
+            hover_color=theme.NAV_ACTIVE_BG, command=lambda: self.on_arp_load(),
         ).pack(side="left")
-
         self._arp_clear_btn = ctk.CTkButton(
-            row,
-            text="Clear",
-            width=60, height=26,
-            font=theme.font_body(11),
-            fg_color=theme.REMOVE_BTN_BG,
-            hover_color=theme.REMOVE_BTN_HOVER,
+            row, text="Clear", width=58, height=32, font=theme.font_body(12),
+            fg_color=theme.NAV_INACTIVE_BG, hover_color=theme.REMOVE_BTN_HOVER,
             command=lambda: self.on_arp_clear(),
         )
-        # not packed until an ARP list is loaded
-
-        self._arp_label = ctk.CTkLabel(
-            self,
-            text="No ARP lists loaded.",
-            fg_color="transparent",
-            text_color=theme.TEXT_MUTED,
-            font=theme.font_body(10),
-            anchor="w",
-            wraplength=theme.SIDEBAR_W - 28,
-            justify="left",
-        )
-        self._arp_label.pack(fill="x", padx=14, pady=(4, 0))
-
-    def _add_poll_button(self) -> None:
-        row = ctk.CTkFrame(self, fg_color="transparent")
-        row.pack(fill="x", padx=14, pady=(10, 0))
-        self._poll_btn = ctk.CTkButton(
-            row,
-            text="Poll Switches",
-            height=38,
-            font=theme.font_bold(13),
-            fg_color=theme.POLL_BTN_BG,
-            hover_color=theme.POLL_BTN_HOVER,
-            corner_radius=theme.CORNER_R,
-            command=self._on_poll_click,
-        )
-        self._poll_btn.pack(side="left", fill="x", expand=True, padx=(0, 6))
-
-        self._stop_btn = ctk.CTkButton(
-            row,
-            text="Stop",
-            width=70,
-            height=38,
-            font=theme.font_bold(12),
-            fg_color=theme.REMOVE_BTN_BG,
-            hover_color=theme.REMOVE_BTN_HOVER,
-            corner_radius=theme.CORNER_R,
-            state="disabled",
-            command=lambda: self.on_stop_requested(),
-        )
-        self._stop_btn.pack(side="left")
+        self._arp_label = self._hint("No ARP lists loaded.")
 
     def _add_export_options_section(self) -> None:
+        self._section("Excel export")
         self._raw_output_checkbox = ctk.CTkCheckBox(
-            self,
-            text="Include raw outputs in Excel",
-            variable=self._include_raw_outputs,
-            onvalue=True,
-            offvalue=False,
-            font=theme.font_body(10),
-            text_color=theme.TEXT_MUTED,
-            fg_color=theme.EXPORT_BTN_BG,
-            hover_color=theme.EXPORT_BTN_HOVER,
-            command=self._confirm_raw_outputs,
+            self._settings, text="Include raw CLI output", variable=self._include_raw_outputs,
+            onvalue=True, offvalue=False, font=theme.font_body(12),
+            text_color=theme.TEXT_MUTED, fg_color=theme.EXPORT_BTN_BG,
+            hover_color=theme.EXPORT_BTN_HOVER, command=self._confirm_raw_outputs,
         )
-        self._raw_output_checkbox.pack(fill="x", padx=14, pady=(8, 0))
+        self._raw_output_checkbox.pack(fill="x", padx=8, pady=(2, 12))
 
     def _confirm_raw_outputs(self) -> None:
-        if not self._include_raw_outputs.get():
-            return
-        confirmed = messagebox.askyesno(
+        if self._include_raw_outputs.get() and not messagebox.askyesno(
             "Sensitive Raw Output",
             "Raw output includes the complete running configuration and may contain "
             "password hashes, SNMP communities, usernames, IP addresses, and other "
             "sensitive client data.\n\nInclude it in Excel exports?",
-            icon="warning",
-        )
-        if not confirmed:
+            icon="warning", parent=self.winfo_toplevel(),
+        ):
             self._include_raw_outputs.set(False)
 
-    def _add_status_area(self) -> None:
-        self._progress_bar = ctk.CTkProgressBar(self, height=6)
-        self._progress_bar.set(0)
-        self._progress_bar.pack(fill="x", padx=14, pady=(8, 2))
-
-        self._status_label = ctk.CTkLabel(
-            self,
-            text="Ready.",
-            fg_color="transparent",
-            text_color=theme.TEXT_MUTED,
-            font=theme.font_body(10),
-            anchor="w",
-            wraplength=theme.SIDEBAR_W - 28,
+    def _add_poll_button(self) -> None:
+        row = ctk.CTkFrame(self._controls, fg_color="transparent")
+        row.pack(fill="x")
+        self._poll_btn = ctk.CTkButton(
+            row, text="Poll switches", width=160, height=40, font=theme.font_bold(14),
+            fg_color=theme.POLL_BTN_BG, hover_color=theme.POLL_BTN_HOVER,
+            corner_radius=theme.CORNER_R, command=self._on_poll_click,
         )
-        self._status_label.pack(fill="x", padx=14)
+        self._poll_btn.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self._stop_btn = ctk.CTkButton(
+            row, text="Stop", width=76, height=40, font=theme.font_bold(12),
+            fg_color=theme.REMOVE_BTN_BG, hover_color=theme.REMOVE_BTN_HOVER,
+            corner_radius=theme.CORNER_R, state="disabled",
+            command=lambda: self.on_stop_requested(),
+        )
+        self._stop_btn.pack(side="left")
+
+    def _add_status_area(self) -> None:
+        self._progress_bar = ctk.CTkProgressBar(
+            self._controls, height=5, fg_color=theme.NAV_INACTIVE_BG,
+            progress_color=theme.ACCENT,
+        )
+        self._progress_bar.set(0)
+        self._progress_bar.pack(fill="x", pady=(12, 5))
+        self._status_label = ctk.CTkLabel(
+            self._controls, text="Ready to connect", text_color=theme.TEXT_MUTED,
+            font=theme.font_body(12), anchor="w", justify="left",
+            wraplength=theme.SIDEBAR_W - 32,
+        )
+        self._status_label.pack(fill="x", pady=(0, 10))
 
     def _add_nav_buttons(self) -> None:
-        nav_items = [
-            ("poll",  "Poll Switches"),
-            ("about", "About"),
-        ]
-        for key, label in nav_items:
+        row = ctk.CTkFrame(self._controls, fg_color="transparent")
+        row.pack(fill="x")
+        for key, label in [("poll", "Workspace"), ("about", "About")]:
             btn = ctk.CTkButton(
-                self,
-                text=f"  {label}",
-                anchor="w",
-                fg_color=theme.NAV_INACTIVE_BG,
-                text_color=theme.TEXT_MUTED,
-                hover_color=theme.NAV_ACTIVE_BG,
-                font=theme.font_bold(11),
-                height=38,
-                corner_radius=theme.CORNER_R,
-                border_width=0,
-                cursor="hand2",
+                row, text=label, width=90, height=30, font=theme.font_body(12),
+                fg_color=theme.NAV_INACTIVE_BG, text_color=theme.TEXT_MUTED,
+                hover_color=theme.NAV_ACTIVE_BG, corner_radius=theme.CORNER_R,
                 command=lambda k=key: self.on_navigate(k),
             )
-            btn.pack(fill="x", padx=6, pady=2)
+            btn.pack(side="left", fill="x", expand=True, padx=(0 if key == "poll" else 6, 0))
             self._nav_buttons[key] = btn
 
     # ── Switch IP row management ───────────────────────────────────────────
@@ -809,22 +711,25 @@ class Sidebar(ctk.CTkScrollableFrame):
         holder.append(row)
         row.pack(anchor="w", pady=2, fill="x")
         self._switch_rows.append(row)
+        row.entry.bind("<KeyRelease>", lambda event: self._refresh_credentials_status(), add="+")
+        row.entry.focus_set()
+        self._refresh_credentials_status()
 
     def _remove_switch_row(self, row: _SwitchRow) -> None:
         if len(self._switch_rows) <= 1:
             return   # always keep at least one row
         self._switch_rows.remove(row)
         row.destroy()
+        self._refresh_credentials_status()
 
     # ── Modal launchers ────────────────────────────────────────────────────
 
     def _open_row_config(self, row: _SwitchRow) -> None:
         popup = _SwitchConfigPopup(self, row, self.use_shared_creds)
-        popup.focus()
+        popup.bind("<Destroy>", lambda event: self._refresh_credentials_status() if event.widget is popup else None, add="+")
 
     def _open_bulk_config(self) -> None:
-        dialog = _BulkConfigDialog(self, self)
-        dialog.focus()
+        _BulkConfigDialog(self, self)
 
     # ── Protocol selection ─────────────────────────────────────────────────
 
@@ -837,6 +742,7 @@ class Sidebar(ctk.CTkScrollableFrame):
                 "switch output will be transmitted in plaintext and could be intercepted.\n\n"
                 "SSH is strongly recommended.",
                 icon="warning",
+                parent=self.winfo_toplevel(),
             )
             if not confirmed:
                 return
@@ -857,6 +763,7 @@ class Sidebar(ctk.CTkScrollableFrame):
             messagebox.showwarning(
                 "No Switches",
                 "Please enter at least one switch IP or hostname.",
+                parent=self.winfo_toplevel(),
             )
             return
 
@@ -875,6 +782,7 @@ class Sidebar(ctk.CTkScrollableFrame):
                 + "\n\nDuplicates will be polled multiple times and produce "
                 "duplicate sheets in the export.\n\nContinue anyway?",
                 icon="warning",
+                parent=self.winfo_toplevel(),
             )
             if not proceed:
                 return
@@ -905,7 +813,8 @@ class Sidebar(ctk.CTkScrollableFrame):
                 "Missing Credentials",
                 "No username/password set for:\n\n"
                 + "\n".join(f"• {h}" for h in missing_creds)
-                + "\n\nOpen “Configure all switches…” to fill them in.",
+                + "\n\nOpen “Credentials & vendors…” to fill them in.",
+                parent=self.winfo_toplevel(),
             )
             return
 

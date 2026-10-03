@@ -75,13 +75,14 @@ class AboutPanel(ctk.CTkFrame):
         ctk.CTkLabel(
             parent,
             text=(
-                "Automated network documentation for Ruckus, Cisco IOS, and HP/Aruba switches.\n"
-                "SSH into your devices, pull live data, and export clean Excel workbooks\n"
+                "Network documentation for Ruckus, Cisco IOS, and HP/Aruba switches.\n"
+                "Connect to your devices and export clear Excel workbooks\n"
                 "with VLAN assignments, MAC addresses, and port states."
             ),
             fg_color="transparent",
             text_color=theme.TEXT_PRIMARY,
             font=theme.font_body(13),
+            wraplength=510,
             justify="center",
         ).pack()
 

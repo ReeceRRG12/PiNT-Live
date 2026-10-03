@@ -1,0 +1,136 @@
+name: Build Desktop Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to build
+        required: true
+        default: v0.7.0-beta.1
+      publish:
+        description: Publish the release after all native builds pass
+        type: boolean
+        default: false
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2022
+            target: Windows-x64
+            architecture: x64
+          - runner: macos-15
+            target: macOS-Apple-Silicon
+            architecture: arm64
+          - runner: macos-15-intel
+            target: macOS-Intel
+            architecture: x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: ${{ matrix.architecture }}
+          cache: pip
+
+      - name: Install application and build tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install . "pyinstaller>=6.10,<7"
+          python -m pip check
+
+      - name: Run automated tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Build and verify native release package
+        shell: bash
+        run: python scripts/build_release.py --tag "$RELEASE_TAG"
+
+      - name: Upload release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: PiNT-Live-${{ env.RELEASE_TAG }}-${{ matrix.target }}
+          path: dist/release/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload frozen smoke report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-${{ matrix.target }}
+          path: build/*-smoke.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+  publish:
+    name: Publish verified desktop release
+    needs: build
+    if: github.event_name == 'push' || inputs.publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all native release assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: PiNT-Live-${{ env.RELEASE_TAG }}-*
+          path: release
+          merge-multiple: true
+
+      - name: Verify complete asset set and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release
+          test -f "PiNT-Live-${RELEASE_TAG}-Windows-x64.exe"
+          test -f "PiNT-Live-${RELEASE_TAG}-macOS-Apple-Silicon.dmg"
+          test -f "PiNT-Live-${RELEASE_TAG}-macOS-Intel.dmg"
+          test "$(find . -name '*.sha256.txt' | wc -l)" -eq 3
+          sha256sum --check ./*.sha256.txt
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            flags=()
+            if [[ "$RELEASE_TAG" == *-* ]]; then
+              flags+=(--prerelease --latest=false)
+            fi
+            gh release create "$RELEASE_TAG" --verify-tag --draft \
+              --title "PiNT Live $RELEASE_TAG" --generate-notes "${flags[@]}"
+          fi
+          gh release upload "$RELEASE_TAG" release/* --clobber
+          flags=()
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            flags+=(--prerelease --latest=false)
+          fi
+          gh release edit "$RELEASE_TAG" --draft=false "${flags[@]}"
