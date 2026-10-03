@@ -1,7 +1,7 @@
 """Build and verify native release assets (Python 3.12 recommended).
 
     python -m pip install . "pyinstaller>=6.10,<7"
-    python scripts/build_release.py --tag v0.7.0-beta.2
+    python scripts/build_release.py --tag v0.7.0-beta.3
 
 Windows produces a portable x64 EXE. macOS produces a DMG containing the
 native .app and an Applications shortcut. Outputs live in dist/release/.
@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def package_version(tag: str) -> str:
     match = re.fullmatch(r"v(\d+\.\d+\.\d+)(?:-(alpha|beta|rc)\.(\d+))?", tag)
     if match is None:
-        raise ValueError("Use a release tag such as v0.7.0-beta.2 or v0.7.0")
+        raise ValueError("Use a release tag such as v0.7.0-beta.3 or v0.7.0")
     version, channel, number = match.groups()
     return version + ({"alpha": "a", "beta": "b", "rc": "rc"}[channel] + number if channel else "")
 
@@ -55,6 +55,20 @@ def verify_windows_x64(executable: Path) -> None:
         stream.seek(pe_offset)
         if stream.read(6) != b"PE\0\0\x64\x86":
             raise RuntimeError("Windows executable is not an x64 PE binary")
+
+
+def verify_macos_crypto() -> None:
+    """Prevent colliding Python/cryptography OpenSSL dylibs in a frozen app."""
+    from cryptography.hazmat.bindings import _rust
+
+    linkage = subprocess.check_output(["otool", "-L", _rust.__file__], text=True)
+    print("Cryptography native linkage:\n" + linkage, flush=True)
+    if any(name in linkage for name in ("libssl.", "libcrypto.")):
+        raise RuntimeError(
+            "macOS release builds require statically linked cryptography. "
+            "Install its binary wheel, or rebuild with OPENSSL_STATIC=1 and "
+            "OPENSSL_DIR pointing to your OpenSSL installation (without pip's wheel cache)."
+        )
 
 
 def verify_frozen_app(executable: Path, report_path: Path, source_version: str) -> None:
@@ -86,6 +100,8 @@ def build(tag: str) -> None:
     else:
         raise RuntimeError(f"Unsupported native build host: {system} {machine}")
 
+    if system == "Darwin":
+        verify_macos_crypto()
     run(sys.executable, "-m", "PyInstaller", "--clean", "--noconfirm", "PiNT_Live.spec")
     output = ROOT / "dist" / "release"
     output.mkdir(parents=True, exist_ok=True)
