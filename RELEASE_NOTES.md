@@ -4,7 +4,7 @@
 
 ## v0.7.0-beta.3 — Desktop Experience (Beta)
 
-Prepared 3 October 2026. Live switch validation is still outstanding; v0.6.1 remains stable.
+Released 3 October 2026. Live switch validation is still outstanding; v0.6.1 remains stable.
 
 - Refreshed slate-and-teal workspace with readable platform fonts, clearer spacing, onboarding guidance, and switch/port/link/MAC totals.
 - Numbered setup steps, visible credential readiness, per-switch vendor labels, and larger configuration dialogs with Return/Escape controls.
@@ -14,7 +14,7 @@ Prepared 3 October 2026. Live switch validation is still outstanding; v0.6.1 rem
 - Native Windows x64 portable EXE plus Apple Silicon and Intel macOS DMGs. Mac users drag the app to Applications; no Python installation is required.
 - Release publishing waits for every platform's tests, frozen-app smoke check, and build. Downloads include SHA-256 checksums.
 
-Validation is recorded in `PROJECT_STATE.md`. Builds are not publisher-signed or Apple-notarized, so operating-system trust prompts may appear. Real switch polling and interactive Windows validation remain required before stable promotion.
+Validation: all 44 tests and frozen GUI startup checks pass on Windows x64, Apple Silicon, and Intel macOS. Downloaded checksums and both DMG images were verified. Details are recorded in `PROJECT_STATE.md`. Builds are not publisher-signed or Apple-notarized, so operating-system trust prompts may appear. Real switch polling and interactive Windows validation remain required before stable promotion.
 
 ---
 

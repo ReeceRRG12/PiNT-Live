@@ -42,7 +42,8 @@ def checksum(asset: Path) -> Path:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     destination = asset.with_suffix(".sha256.txt")
-    destination.write_text(f"{digest.hexdigest()}  {asset.name}\n", encoding="ascii")
+    # macOS shasum treats CRLF's carriage return as part of the filename.
+    destination.write_text(f"{digest.hexdigest()}  {asset.name}\n", encoding="ascii", newline="\n")
     return destination
 
 
