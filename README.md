@@ -48,6 +48,14 @@ On Windows, activate the environment with `.venv\Scripts\activate` instead.
 
 On later launches, activate the existing environment and run `pint-live` again.
 
+To run the automated checks from the project directory:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+The checks use simulated switch data and do not connect to live hardware. Current maintenance work and its verification status are recorded in [PROJECT_STATE.md](PROJECT_STATE.md).
+
 ---
 
 ## 🗺️ Roadmap
@@ -100,7 +108,7 @@ pint-live/
 
 ## 🚧 Status
 
-**v0.6.1 Stable** — Ruckus LLDP/CDP neighbour discovery is hardware-tested and exports neighbour names, management IPs, remote ports, and platforms without requiring an ARP list. This release fixes the field-format issues found during v0.6 beta testing. See [RELEASE_NOTES.md](RELEASE_NOTES.md) for full change history.
+**v0.6.2-beta.1 — Reliability beta** — includes polling, Excel export, ARP import, and Cisco parsing fixes. Automated checks pass; these changes are awaiting live hardware validation. **v0.6.1 remains the stable release.** See [RELEASE_NOTES.md](RELEASE_NOTES.md) for the changes and validation details.
 
 ---
 

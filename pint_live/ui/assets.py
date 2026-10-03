@@ -8,6 +8,7 @@ taskbar icon, with full support for PyInstaller frozen builds.
 import os
 import sys
 import tempfile
+from tkinter import PhotoImage, TclError
 from typing import Optional
 
 import customtkinter as ctk
@@ -68,15 +69,24 @@ def set_taskbar_icon(window: ctk.CTk, filename: str = "PiNT_InAppLogo.png") -> N
     """
     Set the window taskbar / title-bar icon from a PNG asset.
 
-    CTk on Windows requires an .ico file for iconbitmap(), so we convert
-    the PNG to a temporary ICO at runtime. Fails silently if Pillow is
-    missing or the file doesn't exist.
+    Windows uses an ICO bitmap; other platforms use Tk's PNG icon support.
+    Fails silently when the platform cannot set an icon or the asset is missing.
     """
     try:
         from PIL import Image
         src  = os.path.join(base_path(), "assets", filename)
+        if sys.platform != "win32":
+            window.iconphoto(True, PhotoImage(master=window, file=src))
+            return
         dest = os.path.join(tempfile.gettempdir(), "pint_live_icon.ico")
         Image.open(src).save(dest, format="ICO", sizes=[(16, 16), (32, 32), (48, 48)])
-        window.after(100, lambda: window.iconbitmap(dest))
+
+        def apply_icon() -> None:
+            try:
+                window.iconbitmap(dest)
+            except TclError:
+                pass
+
+        window.after(100, apply_icon)
     except Exception:
         pass

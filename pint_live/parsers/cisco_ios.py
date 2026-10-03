@@ -20,8 +20,10 @@ def _parse_version(output: str, data: ParsedSwitchData) -> None:
         # First non-blank line is typically: "<hostname> uptime is ..."
         if not data.hostname and "uptime is" in line.lower():
             data.hostname = line.split()[0].strip()
-        if not data.model and re.match(r"^cisco\s+\S+", line, re.IGNORECASE):
-            m = re.match(r"^cisco\s+(\S+)", line, re.IGNORECASE)
+        if not data.model:
+            # Hardware lines put the processor/revision in parentheses after
+            # the model. Software banners such as "Cisco IOS Software" do not.
+            m = re.match(r"^\s*cisco\s+(\S+)\s+\(", line, re.IGNORECASE)
             if m:
                 data.model = m.group(1)
         if not data.firmware:
@@ -134,21 +136,45 @@ _VLAN_NAME_RE = re.compile(r"^\s+name\s+(.+)$", re.IGNORECASE)
 _INTF_HDR_RE  = re.compile(r"^interface\s+(\S+)", re.IGNORECASE)
 _ACCESS_RE    = re.compile(r"switchport\s+access\s+vlan\s+(\d+)", re.IGNORECASE)
 _NATIVE_RE    = re.compile(r"switchport\s+trunk\s+native\s+vlan\s+(\d+)", re.IGNORECASE)
-_ALLOWED_RE   = re.compile(r"switchport\s+trunk\s+allowed\s+vlan\s+(.+)", re.IGNORECASE)
+_ALLOWED_RE   = re.compile(
+    r"^(no\s+)?switchport\s+trunk\s+allowed\s+vlan(?:\s+(.+))?$", re.IGNORECASE,
+)
 _DESC_RE      = re.compile(r"^\s+description\s+(.+)$", re.IGNORECASE)
+_ALL_VLANS    = frozenset(range(1, 4095))
 
 
-def _expand_cisco_vlan_list(vlan_str: str) -> list[str]:
+def _expand_cisco_vlan_list(vlan_str: str) -> set[int]:
     """Expand '1,10,20-25,30' into individual VLAN IDs."""
-    result = []
+    result = set()
     for part in vlan_str.split(","):
-        part = part.strip()
-        if "-" in part:
-            lo, hi = part.split("-", 1)
-            result.extend(str(v) for v in range(int(lo), int(hi) + 1))
-        elif part:
-            result.append(part)
+        match = re.fullmatch(r"(\d+)(?:-(\d+))?", part.strip())
+        if not match:
+            raise ValueError("Invalid VLAN list")
+        lo = int(match.group(1))
+        hi = int(match.group(2) or lo)
+        if not 1 <= lo <= hi <= 4094:
+            raise ValueError("VLAN IDs must be between 1 and 4094")
+        result.update(range(lo, hi + 1))
     return result
+
+
+def _apply_allowed_vlans(current: set[int] | frozenset[int], expression: str) -> set[int]:
+    """Apply an IOS allowed-VLAN command to the preceding list, in order."""
+    expression = expression.strip().lower()
+    if expression == "all":
+        return set(_ALL_VLANS)
+    if expression == "none":
+        return set()
+    parts = expression.split(maxsplit=1)
+    operation = parts[0] if parts else ""
+    if operation in {"add", "remove", "except"}:
+        vlans = _expand_cisco_vlan_list(parts[1] if len(parts) > 1 else "")
+        if operation == "add":
+            return set(current) | vlans
+        if operation == "remove":
+            return set(current) - vlans
+        return set(_ALL_VLANS - vlans)
+    return _expand_cisco_vlan_list(expression)
 
 
 def _normalize_port(name: str) -> str:
@@ -212,7 +238,18 @@ def _parse_running_config(output: str, data: ParsedSwitchData) -> None:
             intf_config[current_intf]["native"] = nm.group(1)
         alm = _ALLOWED_RE.search(stripped)
         if alm:
-            intf_config[current_intf]["allowed"] = _expand_cisco_vlan_list(alm.group(1))
+            cfg = intf_config[current_intf]
+            if alm.group(1) and alm.group(2) is None:
+                cfg["allowed"] = set(_ALL_VLANS)
+            elif not alm.group(1) and alm.group(2):
+                try:
+                    cfg["allowed"] = _apply_allowed_vlans(
+                        cfg.get("allowed", _ALL_VLANS), alm.group(2),
+                    )
+                except ValueError:
+                    # A malformed/truncated line must not discard port data
+                    # or replace a previously recognised allowed-VLAN list.
+                    pass
         dm = _DESC_RE.match(line)
         if dm:
             intf_config[current_intf]["description"] = dm.group(1).strip()
@@ -232,7 +269,17 @@ def _parse_running_config(output: str, data: ParsedSwitchData) -> None:
         elif "native" in cfg:
             intf.untagged_vlan = vlan_label(cfg["native"])
         if "allowed" in cfg:
-            intf.tagged_vlans = ", ".join(vlan_label(v) for v in cfg["allowed"])
+            allowed = cfg["allowed"]
+            if allowed == _ALL_VLANS:
+                intf.tagged_vlans = "All (1-4094)"
+            elif not allowed:
+                intf.tagged_vlans = "None"
+            elif len(allowed) > len(_ALL_VLANS) // 2:
+                intf.tagged_vlans = "All except " + ", ".join(
+                    vlan_label(str(v)) for v in sorted(_ALL_VLANS - allowed)
+                )
+            else:
+                intf.tagged_vlans = ", ".join(vlan_label(str(v)) for v in sorted(allowed))
 
 
 # ---------------------------------------------------------------------------

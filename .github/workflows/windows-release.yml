@@ -6,7 +6,7 @@ on:
       tag:
         description: Existing release tag to build
         required: true
-        default: v0.6.1
+        default: v0.6.2-beta.1
   push:
     tags:
       - "v*"
@@ -69,9 +69,14 @@ jobs:
         run: |
           gh release view "$env:RELEASE_TAG" *> $null
           if ($LASTEXITCODE -ne 0) {
+            $releaseFlags = @()
+            if ($env:RELEASE_TAG -match '-') {
+              $releaseFlags = @("--prerelease", "--latest=false")
+            }
             gh release create "$env:RELEASE_TAG" `
               --title "PiNT Live $env:RELEASE_TAG" `
-              --generate-notes
+              --generate-notes @releaseFlags
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
           gh release upload "$env:RELEASE_TAG" `
             "dist/PiNT-Live-$env:RELEASE_TAG-Windows.exe" `

@@ -68,10 +68,9 @@ class ArpTable:
     _by_mac: dict[str, ArpEntry] = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
-        # Last write wins if a file has duplicate MACs.
-        for entry in self.entries:
-            if entry.mac:
-                self._by_mac[entry.mac] = entry
+        self._by_mac = {}
+        self._merge_entries(self.entries)
+        self.source_paths = list(dict.fromkeys(self.source_paths))
 
     def __len__(self) -> int:
         return len(self.entries)
@@ -84,18 +83,19 @@ class ArpTable:
         """Merge another ArpTable into this one. Later entries overwrite
         earlier ones on MAC collision, but a blank hostname never overwrites
         a populated one — handy when ARP sources vary in hostname coverage."""
-        for entry in other.entries:
-            if not entry.mac:
+        self._merge_entries(other.entries)
+        self.source_paths = list(dict.fromkeys(self.source_paths + other.source_paths))
+
+    def _merge_entries(self, entries: list[ArpEntry]) -> None:
+        for entry in entries:
+            mac = normalise_mac(entry.mac)
+            if not mac:
                 continue
-            existing = self._by_mac.get(entry.mac)
-            if existing is not None and not entry.hostname and existing.hostname:
-                # New entry would erase the hostname — keep the populated one,
-                # but adopt the newer IP in case it's been re-assigned.
-                existing.ip = entry.ip
-                continue
-            self._by_mac[entry.mac] = entry
-            self.entries.append(entry)
-        self.source_paths.extend(other.source_paths)
+            existing = self._by_mac.get(mac)
+            hostname = entry.hostname or (existing.hostname if existing else "")
+            # Copy values so merging never mutates a source table's entries.
+            self._by_mac[mac] = ArpEntry(ip=entry.ip, mac=mac, hostname=hostname)
+        self.entries = list(self._by_mac.values())
 
     def lookup(self, mac: str) -> ArpEntry | None:
         return self._by_mac.get(normalise_mac(mac))
@@ -133,43 +133,51 @@ def load_arp_xlsx(path: Path) -> ArpTable:
     except Exception as exc:
         raise ArpLoadError(f"Could not open workbook: {exc}") from exc
 
-    ws = wb.active
-    rows = ws.iter_rows(values_only=True)
-
     try:
-        header = next(rows)
-    except StopIteration:
-        raise ArpLoadError("Workbook is empty.")
+        ws = wb.active
+        if ws is None:
+            raise ArpLoadError("Workbook has no active worksheet.")
+        rows = ws.iter_rows(values_only=True)
+        header = next(rows, None)
+        if header is None:
+            raise ArpLoadError("Workbook is empty.")
 
-    col_map: dict[str, int] = {}
-    for idx, value in enumerate(header):
-        kind = _classify_header(value)
-        if kind and kind not in col_map:
-            col_map[kind] = idx
+        col_map: dict[str, int] = {}
+        for idx, value in enumerate(header):
+            kind = _classify_header(value)
+            if kind and kind not in col_map:
+                col_map[kind] = idx
 
-    if "ip" not in col_map or "mac" not in col_map:
-        raise ArpLoadError(
-            "ARP file must have IP and MAC columns. "
-            f"Found headers: {[h for h in header if h is not None]}"
-        )
+        if "ip" not in col_map or "mac" not in col_map:
+            raise ArpLoadError(
+                "ARP file must have IP and MAC columns. "
+                f"Found headers: {[h for h in header if h is not None]}"
+            )
 
-    ip_idx       = col_map["ip"]
-    mac_idx      = col_map["mac"]
-    hostname_idx = col_map.get("hostname")
+        ip_idx       = col_map["ip"]
+        mac_idx      = col_map["mac"]
+        hostname_idx = col_map.get("hostname")
 
-    entries: list[ArpEntry] = []
-    for row in rows:
-        if not row:
-            continue
-        ip  = _cell_str(row, ip_idx)
-        mac = normalise_mac(_cell_str(row, mac_idx))
-        if not ip or not mac:
-            continue
-        hostname = _cell_str(row, hostname_idx) if hostname_idx is not None else ""
-        entries.append(ArpEntry(ip=ip, mac=mac, hostname=hostname))
+        entries: list[ArpEntry] = []
+        for row in rows:
+            if not row:
+                continue
+            ip  = _cell_str(row, ip_idx)
+            mac = normalise_mac(_cell_str(row, mac_idx))
+            if not ip or not mac:
+                continue
+            hostname = _cell_str(row, hostname_idx) if hostname_idx is not None else ""
+            entries.append(ArpEntry(ip=ip, mac=mac, hostname=hostname))
 
-    wb.close()
-    return ArpTable(source_paths=[Path(path)], entries=entries)
+        return ArpTable(source_paths=[Path(path)], entries=entries)
+    except ArpLoadError:
+        raise
+    except Exception as exc:
+        # Read-only workbooks parse rows lazily; corruption can surface here,
+        # after load_workbook succeeded. Keep failures isolated per file.
+        raise ArpLoadError(f"Could not read workbook: {exc}") from exc
+    finally:
+        wb.close()
 
 
 def load_arp_xlsx_many(paths) -> tuple[ArpTable, list[tuple[Path, str]]]:

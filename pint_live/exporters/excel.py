@@ -2,8 +2,10 @@
 
 from datetime import datetime
 from pathlib import Path
+import re
 
 from openpyxl import Workbook
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
@@ -24,6 +26,37 @@ COLOUR_WARNING    = "FFF2CC"
 
 THIN = Side(style="thin", color="CCCCCC")
 BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+
+
+def _clean_text(value: str) -> str:
+    """Remove control characters Excel cannot store in worksheet XML."""
+    return ILLEGAL_CHARACTERS_RE.sub("", value)
+
+
+def _set_literal_text(cell, value: str) -> None:
+    """Keep device and imported text literal, including leading '=' values."""
+    cell.value = _clean_text(value)
+    cell.data_type = "s"
+
+
+def _append_literal_row(ws, values) -> None:
+    ws.append([_clean_text(value) if isinstance(value, str) else value for value in values])
+    for cell in ws[ws.max_row]:
+        if isinstance(cell.value, str):
+            cell.data_type = "s"
+
+
+def _detail_sheet_name(wb: Workbook, name: str, suffix: str = "") -> str:
+    """Allocate a valid, unique Excel title while retaining the sheet purpose."""
+    base = re.sub(r"[\\/*?:\[\]]", "_", _clean_text(name)).strip(" '") or "Switch"
+    existing = {title.casefold() for title in wb.sheetnames}
+    counter = 1
+    while True:
+        tail = (f" ({counter})" if counter > 1 else "") + suffix
+        candidate = (base[:31 - len(tail)] + tail).strip("'")
+        if candidate.casefold() not in existing:
+            return candidate
+        counter += 1
 
 
 def _header_style(cell, text: str) -> None:
@@ -83,7 +116,7 @@ def _write_interfaces_sheet(
     data: ParsedSwitchData,
     arp_table: ArpTable | None = None,
 ) -> str:
-    tab_name = (data.hostname or data.host)[:31]  # Excel tab name limit
+    tab_name = _detail_sheet_name(wb, data.hostname or data.host)
     ws = wb.create_sheet(title=tab_name)
 
     if arp_table is not None:
@@ -100,7 +133,7 @@ def _write_interfaces_sheet(
     col_span = f"A2:{get_column_letter(num_cols)}2"
     ws.merge_cells(col_span)
     title_cell = ws["A2"]
-    title_cell.value = f"{data.model or 'Ruckus ICX'}  |  {data.hostname or data.host}  |  {data.host}  |  Polled: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+    _set_literal_text(title_cell, f"{data.model or 'Unknown model'}  |  {data.hostname or data.host}  |  {data.host}  |  Polled: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     title_cell.font = Font(bold=True, size=11, color=COLOUR_HEADER)
     title_cell.alignment = Alignment(horizontal="left", vertical="center")
     ws.row_dimensions[2].height = 22
@@ -149,7 +182,7 @@ def _write_interfaces_sheet(
             ", ".join(n.platform for n in neighbors),
         ])
         row.append(intf.description)
-        ws.append(row)
+        _append_literal_row(ws, row)
         row_idx = ws.max_row
         fill = _link_fill(intf.link)
         for col in range(1, len(row) + 1):
@@ -161,12 +194,13 @@ def _write_interfaces_sheet(
 
     _set_col_widths(ws, widths)
     ws.freeze_panes = "A5"
+    ws.auto_filter.ref = f"A4:{get_column_letter(num_cols)}{ws.max_row}"
     return ws.title
 
 
 def _write_lags_sheet(wb: Workbook, data: ParsedSwitchData) -> str:
     """Write a dedicated LAG summary for a switch."""
-    base_name = f"{data.hostname or data.host} LAGs"[:31]
+    base_name = _detail_sheet_name(wb, data.hostname or data.host, " LAGs")
     ws = wb.create_sheet(title=base_name)
     _add_summary_link(ws)
     headers = [
@@ -182,7 +216,7 @@ def _write_lags_sheet(wb: Workbook, data: ParsedSwitchData) -> str:
         up_count = sum(state.lower() == "up" for state in lag.member_states.values())
         known_count = len(lag.member_states)
         member_health = f"{up_count}/{known_count}" if known_count else "Unknown"
-        ws.append([
+        _append_literal_row(ws, [
             lag.lag_id,
             lag.name,
             lag.mode,
@@ -208,7 +242,7 @@ def _write_lags_sheet(wb: Workbook, data: ParsedSwitchData) -> str:
 
 def _write_raw_outputs_sheet(wb: Workbook, data: ParsedSwitchData) -> str:
     """Write command output one line per row, avoiding Excel cell limits."""
-    base_name = f"{data.hostname or data.host} Raw"[:31]
+    base_name = _detail_sheet_name(wb, data.hostname or data.host, " Raw")
     ws = wb.create_sheet(title=base_name)
     _add_summary_link(ws)
     ws.merge_cells("A2:C2")
@@ -231,14 +265,12 @@ def _write_raw_outputs_sheet(wb: Workbook, data: ParsedSwitchData) -> str:
     for command, output in data.raw_outputs.items():
         lines = output.splitlines() or [""]
         for line_number, line in enumerate(lines, start=1):
-            ws.append([command, line_number, line])
+            _append_literal_row(ws, [command, line_number, line])
             row = ws.max_row
             for cell in ws[row]:
                 cell.border = BORDER
                 cell.alignment = Alignment(vertical="top")
                 cell.font = Font(name="Courier New" if cell.column == 3 else "Arial", size=9)
-            # Force raw device text to remain text even if it begins with '='.
-            ws.cell(row=row, column=3).data_type = "s"
 
     _set_col_widths(ws, [26, 9, 120])
     ws.freeze_panes = "C5"
@@ -255,7 +287,7 @@ def _write_summary_sheet(
     all_data: list[ParsedSwitchData],
     sheet_links: list[dict[str, str | None]],
 ) -> None:
-    ws = wb.create_sheet(title="Summary", index=0)
+    ws = wb["Summary"]
 
     headers = [
         "Switch", "Host", "Model", "Firmware", "Total Ports", "Up", "Down",
@@ -273,7 +305,7 @@ def _write_summary_sheet(
         up       = sum(1 for i in data.interfaces if i.link.lower() == "up")
         disabled = sum(1 for i in data.interfaces if i.link.lower() == "disabled")
         down     = total - up - disabled
-        ws.append([
+        _append_literal_row(ws, [
             data.hostname or data.host,
             data.host,
             data.model,
@@ -316,7 +348,8 @@ def export(
     that map MACs from the switch's MAC table to entries in the ARP list.
     Raw CLI sheets are only written when explicitly requested."""
     wb = Workbook()
-    wb.remove(wb.active)  # remove default empty sheet
+    # Reserve the navigation destination before allocating device sheet names.
+    wb.active.title = "Summary"
 
     sheet_links: list[dict[str, str | None]] = []
     for data in all_data:

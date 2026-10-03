@@ -72,11 +72,12 @@ class ResultsTable(ctk.CTkFrame):
         """Replace the current contents with rows from all_data."""
         self.clear()
 
-        # Pre-build port → MAC lookup for each switch
-        port_macs = _build_port_mac_index(all_data)
         arp       = self._arp_table
 
         for switch in all_data:
+            # A host can appear more than once when it was polled repeatedly.
+            # Keep each snapshot's MACs with that snapshot's interfaces.
+            port_macs = _build_port_mac_index(switch)
             parent = self._tree.insert(
                 "",
                 "end",
@@ -87,7 +88,7 @@ class ResultsTable(ctk.CTkFrame):
             )
 
             for intf in switch.interfaces:
-                macs_list = port_macs[switch.host].get(intf.port, [])
+                macs_list = port_macs.get(intf.port, [])
                 macs      = ", ".join(macs_list)
                 row_values = [
                     intf.port,
@@ -202,16 +203,10 @@ def _link_tag(link: str) -> str:
 
 
 def _build_port_mac_index(
-    all_data: list[ParsedSwitchData],
-) -> dict[str, dict[str, list[str]]]:
-    """
-    Build a nested dict: host → port → [mac, mac, ...].
-    Used to quickly look up which MACs were seen on each interface.
-    """
-    index: dict[str, dict[str, list[str]]] = {}
-    for switch in all_data:
-        port_map: dict[str, list[str]] = {}
-        for entry in switch.mac_table:
-            port_map.setdefault(entry.port, []).append(entry.mac)
-        index[switch.host] = port_map
-    return index
+    switch: ParsedSwitchData,
+) -> dict[str, list[str]]:
+    """Index port → MACs for one switch snapshot."""
+    port_map: dict[str, list[str]] = {}
+    for entry in switch.mac_table:
+        port_map.setdefault(entry.port, []).append(entry.mac)
+    return port_map

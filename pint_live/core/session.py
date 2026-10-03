@@ -1,12 +1,9 @@
-"""SSH session management via Netmiko."""
+"""SSH and Telnet session management via Netmiko."""
 
 from dataclasses import dataclass
 from typing import Optional
 
 from netmiko import ConnectHandler, NetmikoAuthenticationException, NetmikoTimeoutException
-from rich.console import Console
-
-console = Console()
 
 
 @dataclass
@@ -19,7 +16,8 @@ class Credentials:
 class SwitchTarget:
     host: str
     credentials: Credentials
-    port: int = 22
+    # Netmiko selects 22 for SSH and 23 for Telnet when no port is supplied.
+    port: Optional[int] = None
 
 
 class SessionError(Exception):
@@ -27,7 +25,7 @@ class SessionError(Exception):
 
 
 def open_session(target: SwitchTarget, device_type: str = "ruckus_fastiron"):
-    """Open a Netmiko SSH session to a switch. Caller is responsible for disconnecting."""
+    """Open a Netmiko session to a switch. Caller is responsible for disconnecting."""
     try:
         connection = ConnectHandler(
             device_type=device_type,

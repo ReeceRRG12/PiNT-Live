@@ -2,6 +2,23 @@
 
 ---
 
+## v0.6.2-beta.1 — Polling and Export Reliability (Beta)
+
+Beta release prepared 3 October 2026. These changes are awaiting live hardware validation; v0.6.1 remains the stable release.
+
+- Telnet now uses its correct default port (23), while SSH retains port 22 and explicit port overrides remain supported.
+- Excel worksheet names now tolerate IPv6 addresses, unsupported characters, duplicate/long hostnames, and switches named `Summary`; navigation continues to point to the correct sheets.
+- Device and ARP strings remain literal text throughout exports, preventing descriptions or hostnames beginning with `=` from becoming formulas. Unsupported Excel control characters are removed.
+- Interface worksheets now include column filters, matching the existing LAG and raw-output sheets.
+- ARP imports retain one entry per MAC, use the newest IP and last nonblank hostname, and avoid inflating the file count when the same path is reloaded. Failed validation or lazy worksheet-reading errors close the workbook and leave other files loadable.
+- Repeated polls of the same host display each snapshot's own MAC addresses.
+- Cisco parsing recognises the hardware model separately from the software banner and applies allowed-VLAN lists and modifiers in order.
+- macOS/Linux use the PNG window icon path; delayed Windows icon failures are handled without a Tk callback traceback.
+
+Validation: all 33 automated tests pass, Python compilation and dependency checks pass, and a macOS desktop startup check completes without callback errors. The Windows release workflow reruns the suite before building the standalone executable and SHA-256 checksum. Live hardware and interactive Windows validation remain outstanding for this beta.
+
+---
+
 ## v0.6.1 — Stable LLDP/CDP Neighbour Discovery
 
 Released 4 August 2026.
