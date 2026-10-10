@@ -9,13 +9,18 @@
 - **Non-goals:** scheduled/headless polling, desired-state configuration changes, and promoting this beta to stable without live hardware validation.
 - **Stages:** correctness fixes complete → version and local checks → main/tag push → native builds and release verification.
 - **Finish condition:** beta 4 published with verified native downloads and saved checkpoint. Stable promotion remains outside scope.
-- **Current next action:** prepare and validate beta 4, then push main/tag to trigger native release builds.
+- **Current next action:** resume release verification at GitHub Actions run `38066502696`; confirm publication and all three native downloads/checksums, then update release notes from pending to verified.
 
 ## Active checkpoint — bug-fix release, 10 October 2026
 
 - User explicitly authorized fixing the review findings, pushing to `main` as a new version, and publishing the release. The fixes are already implemented; release target is `v0.7.0-beta.4`, package/app version `0.7.0b4`.
 - Remote recheck confirmed `origin/main` at `0f82fb6` and no beta 4 tag/release. Preserve beta classification and existing stable branches; live-switch validation remains outstanding.
-- Current stage: version preparation and local verification. Next: commit fixes/version/docs, fast-forward main, push main/tag, then verify the three native builds, published release and asset checksums. Never rewrite a published tag.
+- Local verification complete: all 53 tests pass, tag/package/app versions agree at `0.7.0b4`, and ARM64 source-GUI startup reports `ok: true` with no callback errors.
+- Committed fixes/version/docs at `44f8883ee0e50e1f6341d42d02b88b154ebe8328`, fast-forwarded main, and successfully pushed main and annotated tag `v0.7.0-beta.4` atomically.
+- Created a draft prerelease titled PiNT Live v0.7.0 Beta 4 — Polling and Data Accuracy, with bug-fix notes. [Native release run 38066502696](https://github.com/ReeceRRG12/PiNT-Live/actions/runs/38066502696) is queued at the tagged commit. Workflow automatically publishes only after Windows x64, Apple Silicon and Intel macOS tests/builds/frozen startup checks and checksum verification succeed.
+- **Current stage: native release build dispatched; final verification pending.** Work paused under the user-authorized usage reserve at 88% used / 12% remaining, with further release verification likely to cross the 10% reserve. No model change. The remote workflow continues independently.
+- Exact resume: `gh run view 38066502696 --json status,conclusion,jobs,url`; inspect failures if any (never rewrite the tag). On success, `gh release view v0.7.0-beta.4 --json isDraft,isPrerelease,assets,url`; download all six assets to an ignored version-specific directory, compare SHA-256 values with checksum files and GitHub asset digests, and verify both DMGs. Then update beta 4 RELEASE_NOTES.md and GitHub release notes from pending to verified, record completion here, and push the final documentation checkpoint.
+- Expected public release: https://github.com/ReeceRRG12/PiNT-Live/releases/tag/v0.7.0-beta.4 . Publication has not yet been verified; v0.6.1 remains stable.
 - Usage at release start: 80% used / 20% remaining in the visible weekly window; secondary window unavailable. Preserve the authorized 10% reserve and save an exact continuation if reached.
 
 ## Checkpoint — bug review, 10 October 2026
