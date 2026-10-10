@@ -99,7 +99,7 @@ class ResultsTable(ctk.CTkFrame):
                     ips       = arp.resolve_ips(macs_list)
                     hostnames = arp.resolve_hostnames(macs_list)
                     row_values.append(", ".join(ips))
-                    row_values.append(", ".join(h for h in hostnames if h))
+                    row_values.append(", ".join(hostnames))
                 row_values.append(intf.description)
                 if not _matches_row(switch, row_values, query, link_filter):
                     continue

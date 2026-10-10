@@ -110,8 +110,29 @@ class ResultsTableTests(unittest.TestCase):
                 self.assertEqual(rows[0]["values"][5], "0000.0000.0001, 0000.0000.0002")
                 self.assertEqual(rows[1]["values"][5], "")
                 if table is not None:
-                    self.assertEqual(rows[0]["values"][6:8], ["192.0.2.11, ", "device"])
+                    self.assertEqual(rows[0]["values"][6:8], ["192.0.2.11, ", "device, "])
                     self.assertEqual(rows[1]["values"][6:8], ["", ""])
+
+    def test_missing_hostnames_keep_their_mac_and_ip_positions(self):
+        switch = ParsedSwitchData(
+            host="192.0.2.1", interfaces=[_interface("1/1/1")],
+            mac_table=[
+                MacEntry(f"0000.0000.000{index}", "1/1/1", "1", "Dynamic")
+                for index in range(1, 4)
+            ],
+        )
+        arp = ArpTable(entries=[
+            ArpEntry("192.0.2.11", "000000000001"),
+            ArpEntry("192.0.2.12", "000000000002", "second-device"),
+        ])
+
+        rows = _render_rows([switch], arp)
+
+        self.assertEqual(rows[0]["values"][5:8], [
+            "0000.0000.0001, 0000.0000.0002, 0000.0000.0003",
+            "192.0.2.11, 192.0.2.12, ",
+            ", second-device, ",
+        ])
 
 
 if __name__ == "__main__":

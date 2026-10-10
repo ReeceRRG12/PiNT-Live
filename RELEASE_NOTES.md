@@ -2,6 +2,18 @@
 
 ---
 
+## v0.7.0-beta.4 — Polling and Data Accuracy (Beta)
+
+Beta release prepared 10 October 2026. Live switch validation is still outstanding; v0.6.1 remains stable.
+
+- Cisco VLAN reporting respects observed access, trunk, and routed interface modes, keeping inactive configuration from appearing as active VLAN membership.
+- Missing ARP hostnames retain their slots so hostnames stay aligned with MAC and IP addresses in the results table and Excel exports.
+- Stop requests during final timeout handling, retry cleanup, or the last command preserve completed results and report **Stopped**.
+
+Validation: all 53 automated tests and a macOS source startup check passed. Native Beta 4 package builds and frozen-app startup checks remain pending. Builds are not publisher-signed or Apple-notarized. Live switch polling and interactive Windows validation remain required before stable promotion.
+
+---
+
 ## v0.7.0-beta.3 — Desktop Experience (Beta)
 
 Released 3 October 2026. Live switch validation is still outstanding; v0.6.1 remains stable.

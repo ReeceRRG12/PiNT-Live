@@ -327,6 +327,9 @@ class PintLiveApp(ctk.CTk):
 
                 # A transient VPN/SSH read failure gets one fresh connection.
                 for attempt in range(1, 3):
+                    if self._stop_event.is_set():
+                        stopped = True
+                        break
                     connection = None
                     try:
                         retry = " (retry)" if attempt == 2 else ""
@@ -357,7 +360,10 @@ class PintLiveApp(ctk.CTk):
                         stopped = True
                         break
                     except ReadTimeout as exc:
-                        if attempt == 1 and not self._stop_event.is_set():
+                        if self._stop_event.is_set():
+                            stopped = True
+                            break
+                        if attempt == 1:
                             self._msg_queue.put((
                                 "status", f"Retrying {host} after a response timeout…", theme.WARNING,
                             ))
@@ -385,6 +391,9 @@ class PintLiveApp(ctk.CTk):
             # Last-resort guard: the UI must never remain permanently busy.
             errors.append(("Poll worker", self._friendly_poll_error(exc)))
         finally:
+            # Stop can arrive during the final command or its cleanup, after
+            # the last between-command/switch cancellation check.
+            stopped = stopped or self._stop_event.is_set()
             self._msg_queue.put(("done", results, errors, stopped))
 
     @staticmethod

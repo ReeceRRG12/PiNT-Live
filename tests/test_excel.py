@@ -137,6 +137,28 @@ class ExcelExportTests(unittest.TestCase):
             finally:
                 workbook.close()
 
+    def test_partial_arp_matches_keep_mac_ip_and_hostname_positions(self):
+        macs = ["0000.0000.0001", "0000.0000.0002", "0000.0000.0003", "0000.0000.0004"]
+        device = ParsedSwitchData(
+            host="192.0.2.1",
+            interfaces=[_interface()],
+            mac_table=[MacEntry(mac, "1/1/1", "1", "Dynamic") for mac in macs],
+        )
+        arp = ArpTable(entries=[
+            ArpEntry("192.0.2.12", macs[1], "printer"),
+            ArpEntry("192.0.2.13", macs[2], ""),
+        ])
+        with tempfile.TemporaryDirectory() as directory:
+            output = export([device], Path(directory) / "partial-arp.xlsx", arp_table=arp)
+            workbook = load_workbook(output)
+            try:
+                main = _linked_sheet(workbook, workbook["Summary"]["I2"])
+                self.assertEqual(main["H5"].value.split(", "), macs)
+                self.assertEqual(main["I5"].value.split(", "), ["", "192.0.2.12", "192.0.2.13", ""])
+                self.assertEqual(main["J5"].value.split(", "), ["", "printer", "", ""])
+            finally:
+                workbook.close()
+
 
 if __name__ == "__main__":
     unittest.main()

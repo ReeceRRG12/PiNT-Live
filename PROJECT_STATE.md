@@ -3,14 +3,35 @@
 ## Brief
 
 - **Purpose:** turn live, mixed-vendor switch data into accurate, shareable network documentation.
-- **Deliverable:** a refreshed Python desktop app, navigable Excel workbooks, and a new beta release with Windows EXE and macOS DMG downloads.
-- **Success:** clearer setup and readable results; usable Windows/macOS sizing; supported polling/export behavior preserved; automated checks pass; native release builds and published asset checksums verified.
+- **Current deliverable:** publish the verified bug fixes on `main` as `v0.7.0-beta.4` (`0.7.0b4`), with Windows x64 EXE and Apple Silicon/Intel macOS DMGs.
+- **Success:** fixes and version committed to `main`; local tests pass; all native release jobs and frozen startup checks pass; published download checksums verified.
 - **Constraints:** preserve the current desktop workflow and vendor support. Credentials stay in memory; raw configuration export remains opt-in. Live hardware validation must be distinguished from simulated checks.
 - **Non-goals:** scheduled/headless polling, desired-state configuration changes, and promoting this beta to stable without live hardware validation.
-- **Stages:** latest-code baseline → GUI and desktop packaging → local verification → native CI builds and GitHub prerelease: **complete**.
-- **Finish condition:** scoped GUI changes verified, new beta published with Windows EXE and Mac DMGs/checksums, and remaining platform/hardware validation recorded here.
+- **Stages:** correctness fixes complete → version and local checks → main/tag push → native builds and release verification.
+- **Finish condition:** beta 4 published with verified native downloads and saved checkpoint. Stable promotion remains outside scope.
+- **Current next action:** prepare and validate beta 4, then push main/tag to trigger native release builds.
 
-## Active checkpoint — desktop release, 3 October 2026
+## Active checkpoint — bug-fix release, 10 October 2026
+
+- User explicitly authorized fixing the review findings, pushing to `main` as a new version, and publishing the release. The fixes are already implemented; release target is `v0.7.0-beta.4`, package/app version `0.7.0b4`.
+- Remote recheck confirmed `origin/main` at `0f82fb6` and no beta 4 tag/release. Preserve beta classification and existing stable branches; live-switch validation remains outstanding.
+- Current stage: version preparation and local verification. Next: commit fixes/version/docs, fast-forward main, push main/tag, then verify the three native builds, published release and asset checksums. Never rewrite a published tag.
+- Usage at release start: 80% used / 20% remaining in the visible weekly window; secondary window unavailable. Preserve the authorized 10% reserve and save an exact continuation if reached.
+
+## Checkpoint — bug review, 10 October 2026
+
+- User requested pulling the latest code and ensuring it is free from bugs. Scope interpreted as review, reproducible fixes, and proportionate verification; no claim that all possible bugs have been eliminated.
+- Clean `main`; `git pull --ff-only` successfully reached GitHub and returned **Already up to date** at `0f82fb6`. Local fixes are on `codex/bug-review-2026-10-10`; no push or release performed.
+- Fixed Cisco VLAN reporting: observed trunk mode selects native VLAN rather than stale access settings; access VLANs come from the interface status even if omitted from configuration; inactive trunk allowed lists are ignored on access/routed ports. Semantics verified against [Cisco's command reference](https://www.cisco.com/c/en/us/td/docs/switches/connectedgrid/cgs2520/software/release/12_2_53_ex/command/reference/cr2520/cli3.pdf), PDF page 94. Default trunk VLAN omission behavior is unchanged.
+- Fixed ARP display/export alignment: missing hostname slots now remain aligned with the corresponding MAC/IP slots in both the results table and saved Excel workbook.
+- Fixed polling Stop handling: a final read timeout after Stop no longer creates a false failure; Stop during retry cleanup prevents reconnection; late Stop preserves completed results and reports Stopped. This resolves the prior backlog item.
+- Verification: **53 tests passed**, including nine new regression tests; `compileall`, `pip check`, and `git diff --check` passed. Workbook alignment includes a save/reload check. Polling regressions reproduced four failing assertions before the fix and passed afterward. Independent reviews covered polling/session/collectors, data paths, sidebar credentials, and packaging helpers.
+- macOS ARM64 source-GUI startup check passed with `ok: true`, version `0.7.0b3`, and no callback errors. No binaries rebuilt, no Windows interactive test, and no live switches contacted.
+- Environment: the existing `.venv` had cloud-offloaded (`dataless`) dependency files that stalled imports. Verification used a temporary environment with the exact installed dependency versions (no project dependency upgrades). Interpreter: `/var/folders/_4/3qdmz6ps78v9hs0l7qf6jy180000gn/T/pint-review-20261010-3e3zoic8/venv/bin/python`; source smoke report alongside it at `desktop-smoke.json`. The temporary environment can expire; recreate from project dependencies if necessary.
+- **Current stage: local review and fixes complete.** Next action remains supported-switch and interactive Windows/high-DPI validation; publication or stable promotion requires a separate delivery decision.
+- Native usage checkpoint: 70% used / 30% remaining in the visible weekly window; secondary window unavailable. No model change or active routing exception.
+
+## Checkpoint — desktop release, 3 October 2026
 
 - User requested pulling latest code, making the GUI nicer/easier, Windows EXE and macOS DMG distribution, and a new release. This explicitly expands the prior scope to UI redesign and Mac packaging.
 - `git pull --ff-only` confirmed clean `main` at `20d67dc` is current. Baseline: all 33 automated tests pass.
@@ -49,7 +70,3 @@
 - Download verification: `PiNT-Live-v0.6.2-beta.1-Windows.exe` is a Windows x64 PE file, 32,413,580 bytes. Its SHA-256 matches both the published checksum file and GitHub asset digest: `e287e75364359e69903263e3f66226569fa80d7858705d366ff194d908c4523e`.
 - Next action: test the beta EXE interactively on Windows and supported switch hardware, especially Cisco VLAN modifiers and Telnet. Stable promotion remains outside the authorized beta scope.
 - Model setting unchanged; no active routing exception.
-
-## Backlog
-
-- Minor polling status issue: Stop requested during the last switch's read timeout can still finish as a failure rather than “Stopped.” Existing completed results are preserved. Reproduce with a collector that sets the stop event and raises `ReadTimeout`, then adjust the worker's completion status in a future polling pass.

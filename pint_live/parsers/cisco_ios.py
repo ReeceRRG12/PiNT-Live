@@ -264,11 +264,16 @@ def _parse_running_config(output: str, data: ParsedSwitchData) -> None:
         # Backfill description from running config if not already set
         if not intf.description and cfg.get("description"):
             intf.description = cfg["description"]
-        if "access" in cfg:
-            intf.untagged_vlan = vlan_label(cfg["access"])
-        elif "native" in cfg:
-            intf.untagged_vlan = vlan_label(cfg["native"])
-        if "allowed" in cfg:
+        # Access and trunk settings can coexist in the saved configuration.
+        # Use the observed port mode so an inactive access setting cannot
+        # override a trunk's native VLAN, or vice versa. The status table also
+        # supplies access VLANs omitted from running-config (including defaults).
+        if intf.tag == "Yes":
+            if "native" in cfg:
+                intf.untagged_vlan = vlan_label(cfg["native"])
+        elif intf.pvid.isdecimal() and 1 <= int(intf.pvid) <= 4094:
+            intf.untagged_vlan = vlan_label(intf.pvid)
+        if intf.tag == "Yes" and "allowed" in cfg:
             allowed = cfg["allowed"]
             if allowed == _ALL_VLANS:
                 intf.tagged_vlans = "All (1-4094)"

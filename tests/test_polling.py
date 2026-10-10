@@ -114,6 +114,80 @@ class PollWorkerTests(unittest.TestCase):
         self.assertTrue(done[3])
         connect.assert_not_called()
 
+    def test_stop_during_last_switch_timeout_preserves_completed_results(self):
+        for stop_attempt in (1, 2):
+            with self.subTest(stop_attempt=stop_attempt):
+                app = _worker_app()
+                connections = [Mock() for _ in range(1 + stop_attempt)]
+                good_collector = Mock()
+                good_collector.collect.return_value = object()
+                stopped_collector = Mock()
+                attempts = 0
+
+                def timeout(*args):
+                    nonlocal attempts
+                    attempts += 1
+                    if attempts == stop_attempt:
+                        app._stop_event.set()
+                    raise ReadTimeout("prompt lost")
+
+                stopped_collector.collect.side_effect = timeout
+                parser = Mock()
+                parser.parse.return_value = _parsed("10.0.0.1")
+
+                with patch("pint_live.ui.app.open_session", side_effect=connections) as connect:
+                    app._poll_worker([
+                        _job("10.0.0.1", good_collector, parser),
+                        _job("10.0.0.2", stopped_collector, parser),
+                    ])
+
+                done = _done_message(app)
+                self.assertEqual([result.host for result in done[1]], ["10.0.0.1"])
+                self.assertEqual(done[2], [])
+                self.assertTrue(done[3])
+                self.assertEqual(connect.call_count, 1 + stop_attempt)
+                for connection in connections:
+                    connection.disconnect.assert_called_once()
+
+    def test_stop_during_retry_cleanup_does_not_reconnect(self):
+        app = _worker_app()
+        connection = Mock()
+        connection.disconnect.side_effect = app._stop_event.set
+        collector = Mock()
+        collector.collect.side_effect = ReadTimeout("prompt lost")
+
+        with patch("pint_live.ui.app.open_session", return_value=connection) as connect:
+            app._poll_worker([_job("10.0.0.1", collector, Mock())])
+
+        done = _done_message(app)
+        self.assertEqual(done[1], [])
+        self.assertEqual(done[2], [])
+        self.assertTrue(done[3])
+        connect.assert_called_once()
+        connection.disconnect.assert_called_once()
+
+    def test_stop_during_last_command_preserves_completed_switch(self):
+        app = _worker_app()
+        connection = Mock()
+        collector = Mock()
+
+        def finish_command(*args):
+            app._stop_event.set()
+            return object()
+
+        collector.collect.side_effect = finish_command
+        parser = Mock()
+        parser.parse.return_value = _parsed("10.0.0.1")
+
+        with patch("pint_live.ui.app.open_session", return_value=connection):
+            app._poll_worker([_job("10.0.0.1", collector, parser)])
+
+        done = _done_message(app)
+        self.assertEqual([result.host for result in done[1]], ["10.0.0.1"])
+        self.assertEqual(done[2], [])
+        self.assertTrue(done[3])
+        connection.disconnect.assert_called_once()
+
     def test_empty_parser_result_is_reported_and_chain_continues(self):
         app = _worker_app()
         connections = [Mock(), Mock()]

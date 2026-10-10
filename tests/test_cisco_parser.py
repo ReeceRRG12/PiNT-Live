@@ -97,9 +97,52 @@ class CiscoParserTests(unittest.TestCase):
             _trunk_config("none", "add 10-12")
             + "interface GigabitEthernet1/0/2\n switchport trunk allowed vlan 20\n!\n"
         )
-        data = parse(_raw(config))
+        raw = _raw(config)
+        raw.interfaces_output = raw.interfaces_output.replace("notconnect   20", "connected    trunk")
+        data = parse(raw)
         self.assertEqual(data.interfaces[0].tagged_vlans, "10, 11, 12")
         self.assertEqual(data.interfaces[1].tagged_vlans, "20")
+
+    def test_inactive_trunk_allowed_list_is_ignored_on_access_and_routed_ports(self):
+        for status_vlan in ("20", "routed"):
+            with self.subTest(status_vlan=status_vlan):
+                raw = _raw(
+                    "interface GigabitEthernet1/0/2\n"
+                    " switchport trunk allowed vlan 10,20\n!\n"
+                )
+                raw.interfaces_output = raw.interfaces_output.replace(
+                    "notconnect   20", f"connected    {status_vlan}",
+                )
+                self.assertEqual(parse(raw).interfaces[1].tagged_vlans, "")
+
+    def test_trunk_native_vlan_ignores_inactive_access_configuration(self):
+        config = (
+            "vlan 20\n name NATIVE\n!\n"
+            "interface GigabitEthernet1/0/1\n"
+            " switchport access vlan 10\n"
+            " switchport trunk native vlan 20\n"
+            " switchport mode trunk\n!\n"
+        )
+        self.assertEqual(parse(_raw(config)).interfaces[0].untagged_vlan, "20 (NATIVE)")
+
+    def test_status_access_vlan_survives_missing_or_inactive_configuration(self):
+        for config in (
+            "",
+            "interface GigabitEthernet1/0/2\n switchport trunk native vlan 10\n!\n",
+        ):
+            with self.subTest(config=config):
+                data = parse(_raw("vlan 20\n name USERS\n!\n" + config))
+                self.assertEqual(data.interfaces[1].untagged_vlan, "20 (USERS)")
+
+    def test_routed_port_does_not_receive_stale_switchport_vlan(self):
+        raw = _raw(
+            "interface GigabitEthernet1/0/2\n"
+            " switchport access vlan 20\n"
+            " switchport trunk native vlan 10\n"
+            " no switchport\n!\n"
+        )
+        raw.interfaces_output = raw.interfaces_output.replace("notconnect   20", "connected    routed")
+        self.assertEqual(parse(raw).interfaces[1].untagged_vlan, "")
 
 
 if __name__ == "__main__":

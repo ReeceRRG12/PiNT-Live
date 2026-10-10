@@ -173,7 +173,7 @@ def _write_interfaces_sheet(
             ips       = arp_table.resolve_ips(macs_list)
             hostnames = arp_table.resolve_hostnames(macs_list)
             row.append(", ".join(ips))
-            row.append(", ".join(h for h in hostnames if h))
+            row.append(", ".join(hostnames))
         row.extend([
             ", ".join(n.protocol for n in neighbors),
             ", ".join(n.device_id for n in neighbors),

@@ -1,3 +1,3 @@
 """PiNT Live — Pi Network Tools, Live."""
 
-__version__ = "0.7.0b3"
+__version__ = "0.7.0b4"

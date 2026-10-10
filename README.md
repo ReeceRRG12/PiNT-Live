@@ -35,15 +35,15 @@ PiNT Live fixes that. Provide it with a list of switch IPs and credentials, poin
 
 ## Download the desktop app
 
-[**Download PiNT Live v0.7.0 Beta 3**](https://github.com/ReeceRRG12/PiNT-Live/releases/tag/v0.7.0-beta.3) — no Python installation needed.
+[**Download PiNT Live v0.7.0 Beta 4**](https://github.com/ReeceRRG12/PiNT-Live/releases/tag/v0.7.0-beta.4) — no Python installation needed.
 
 | Platform | Download | Open the app |
 |---|---|---|
-| Windows 10/11, x64 | `PiNT-Live-v0.7.0-beta.3-Windows-x64.exe` | Download and double-click the portable EXE. |
-| macOS, Apple Silicon (M-series) | `PiNT-Live-v0.7.0-beta.3-macOS-Apple-Silicon.dmg` | Open the DMG, drag **PiNT Live** into **Applications**, then launch it there. |
-| macOS, Intel | `PiNT-Live-v0.7.0-beta.3-macOS-Intel.dmg` | Open the DMG, drag **PiNT Live** into **Applications**, then launch it there. |
+| Windows 10/11, x64 | `PiNT-Live-v0.7.0-beta.4-Windows-x64.exe` | Download and double-click the portable EXE. |
+| macOS, Apple Silicon (M-series) | `PiNT-Live-v0.7.0-beta.4-macOS-Apple-Silicon.dmg` | Open the DMG, drag **PiNT Live** into **Applications**, then launch it there. |
+| macOS, Intel | `PiNT-Live-v0.7.0-beta.4-macOS-Intel.dmg` | Open the DMG, drag **PiNT Live** into **Applications**, then launch it there. |
 
-These beta builds are not publisher-signed or Apple-notarized. Windows SmartScreen or macOS Gatekeeper may ask for approval. On macOS, if launch is blocked, follow [Apple's first-launch guidance](https://support.apple.com/en-gb/102445) only for the download you trust. Each download has a SHA-256 checksum alongside it. Mac builds are checked on macOS 15; older versions are not yet validated. Live switch validation of this beta remains outstanding; v0.6.1 remains stable.
+These beta builds are not publisher-signed or Apple-notarized. Windows SmartScreen or macOS Gatekeeper may ask for approval. On macOS, if launch is blocked, follow [Apple's first-launch guidance](https://support.apple.com/en-gb/102445) only for the download you trust. Each download has a SHA-256 checksum alongside it. The macOS build workflow targets macOS 15; older versions are not yet validated. Live switch validation of this beta remains outstanding; v0.6.1 remains stable.
 
 ### Getting started
 
@@ -131,7 +131,7 @@ pint-live/
 
 ## 🚧 Status
 
-**v0.7.0-beta.3 — Desktop experience beta** — adds a refreshed workspace, searchable results, native display scaling, and Windows/macOS downloads on top of the reliability fixes. These changes are awaiting live hardware validation. **v0.6.1 remains the stable release.** See [RELEASE_NOTES.md](RELEASE_NOTES.md) for the changes and validation details.
+**v0.7.0-beta.4 — Polling and data accuracy beta** — corrects Cisco VLAN reporting, preserves ARP hostname alignment, and reliably reports stopped polls while keeping completed results. It includes the refreshed desktop workspace and Windows/macOS packaging introduced in Beta 3. These changes are awaiting live hardware validation. **v0.6.1 remains the stable release.** See [RELEASE_NOTES.md](RELEASE_NOTES.md) for the changes and validation details.
 
 ---
 

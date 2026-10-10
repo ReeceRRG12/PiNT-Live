@@ -1,7 +1,7 @@
 """Build and verify native release assets (Python 3.12 recommended).
 
     python -m pip install . "pyinstaller>=6.10,<7"
-    python scripts/build_release.py --tag v0.7.0-beta.3
+    python scripts/build_release.py --tag v0.7.0-beta.4
 
 Windows produces a portable x64 EXE. macOS produces a DMG containing the
 native .app and an Applications shortcut. Outputs live in dist/release/.
@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def package_version(tag: str) -> str:
     match = re.fullmatch(r"v(\d+\.\d+\.\d+)(?:-(alpha|beta|rc)\.(\d+))?", tag)
     if match is None:
-        raise ValueError("Use a release tag such as v0.7.0-beta.3 or v0.7.0")
+        raise ValueError("Use a release tag such as v0.7.0-beta.4 or v0.7.0")
     version, channel, number = match.groups()
     return version + ({"alpha": "a", "beta": "b", "rc": "rc"}[channel] + number if channel else "")
 
