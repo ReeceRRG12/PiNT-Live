@@ -19,11 +19,10 @@ from pathlib import Path
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
-from netmiko.exceptions import ReadTimeout
 
 from pint_live.arp          import ArpTable, ArpLoadError, load_arp_xlsx_many
-from pint_live.core.session import Credentials, SwitchTarget, open_session, SessionError
-from pint_live.core.polling import PollCancelled
+from pint_live.core.session import Credentials, open_session
+from pint_live.core.polling import friendly_poll_error, run_poll
 from pint_live.exporters    import excel as excel_exporter
 from pint_live.models       import ParsedSwitchData
 from pint_live import __version__
@@ -66,6 +65,9 @@ class PintLiveApp(ctk.CTk):
 
         # App state
         self._poll_results: list[ParsedSwitchData] = []
+        self._results_by_row: dict[str, ParsedSwitchData] = {}
+        self._failed_row_ids: set[str] = set()
+        self._poll_order: list[str] = []
         self._arp_table: ArpTable | None = None
         self._msg_queue: queue.Queue = queue.Queue()
         self._stop_event = threading.Event()
@@ -252,156 +254,100 @@ class PintLiveApp(ctk.CTk):
             self._metric_values[key].configure(text=f"{value:,}")
 
     def _start_poll(self, config: dict) -> None:
-        """
-        Called by the sidebar when the user clicks Poll Switches.
-        Each switch carries its own vendor and resolved credentials, so
-        we resolve device_type/collector/parser per switch here.
-        """
-        protocol = config["protocol"]
-        self._polling = True
+        """Snapshot current settings, retaining earlier successes for a retry."""
+        if self._polling:
+            return
+        retry_failed = config.get("retry_failed", False)
+        max_workers = config.get("max_workers", 1)
+        if type(max_workers) is not int or not 1 <= max_workers <= 20:
+            messagebox.showwarning(
+                "Polling Settings", "Choose between 1 and 20 simultaneous switches.",
+                parent=self,
+            )
+            return
 
-        self._stop_event.clear()
-
-        self._sidebar.set_busy(True)
-        self._sidebar.set_progress(0)
-        self._sidebar.set_status("Connecting…", theme.ACCENT)
-        self._export_btn.configure(state="disabled")
-        self._results_table.clear()
-        self._poll_results = []
-        self._search.delete(0, "end")
-        self._link_filter.set("All ports")
-        self._update_metrics()
-        self._empty_title.configure(text="Discovering your network…")
-        self._empty_description.configure(text="Results appear when polling finishes.\nYou can stop at any time and keep completed switches.")
-        self._empty_state.place(relx=0.5, rely=0.5, anchor="center")
-        self._results_caption.configure(text="Polling in progress")
-        self._navigate("poll")
-
-        # Build a per-switch job list the worker can iterate over without
-        # needing access to the vendor registry itself.
+        # Resolve everything on the main thread before starting workers.
         jobs = []
-        for sw in config["switches"]:
+        for index, sw in enumerate(config["switches"]):
+            row_id = sw.get("row_id", str(index))
+            if retry_failed and row_id not in self._failed_row_ids:
+                continue
             vendor_cfg = VENDORS[sw["vendor"]]
             device_type = (
                 vendor_cfg["device_type_telnet"]
-                if protocol == "Telnet"
+                if config["protocol"] == "Telnet"
                 else vendor_cfg["device_type_ssh"]
             )
             jobs.append({
-                "host":        sw["host"],
-                "vendor":      sw["vendor"],
+                "row_id": row_id,
+                "host": sw["host"],
+                "vendor": sw["vendor"],
                 "device_type": device_type,
-                "collector":   vendor_cfg["collector"],
-                "parser":      vendor_cfg["parser"],
-                "credentials": Credentials(
-                    username=sw["username"],
-                    password=sw["password"],
-                ),
+                "collector": vendor_cfg["collector"],
+                "parser": vendor_cfg["parser"],
+                "credentials": Credentials(sw["username"], sw["password"]),
             })
+        if not jobs:
+            return
 
-        thread = threading.Thread(
-            target=self._poll_worker,
-            args=(jobs,),
-            daemon=True,
+        if not retry_failed:
+            self._results_by_row = {}
+            self._failed_row_ids = set()
+            self._poll_order = [job["row_id"] for job in jobs]
+            self._poll_results = []
+            self._results_table.clear()
+            self._search.delete(0, "end")
+            self._link_filter.set("All ports")
+            self._sidebar.set_failed_switches(set())
+            self._update_metrics()
+
+        self._polling = True
+        self._stop_event.clear()
+        self._sidebar.set_busy(True)
+        self._sidebar.set_progress(0)
+        self._sidebar.set_status(
+            f"{'Retrying' if retry_failed else 'Polling'} {len(jobs)} switch(es), "
+            f"up to {max_workers} at once…", theme.ACCENT,
         )
-        thread.start()
+        self._export_btn.configure(state="disabled")
+        if not self._poll_results:
+            self._empty_title.configure(
+                text="Retrying failed switches…" if retry_failed else "Discovering your network…",
+            )
+            self._empty_description.configure(
+                text="Results appear when polling finishes.\nYou can stop at any time and keep completed switches.",
+            )
+            self._empty_state.place(relx=0.5, rely=0.5, anchor="center")
+        self._results_caption.configure(
+            text="Retrying failed switches; previous results retained" if retry_failed else "Polling in progress",
+        )
+        self._navigate("poll")
+        threading.Thread(
+            target=self._poll_worker, args=(jobs, max_workers), daemon=True,
+        ).start()
 
-    def _poll_worker(self, jobs: list[dict]) -> None:
-        """
-        Runs in a background thread — never touches the GUI directly.
-        Posts messages to _msg_queue for the main thread to consume.
-        """
-        results: list[ParsedSwitchData] = []
-        errors: list[tuple[str, str]] = []
-        total = len(jobs)
-        stopped = False
-
+    def _poll_worker(self, jobs: list[dict], max_workers: int = 1) -> None:
+        """Run bounded background polling; only the queue communicates with Tk."""
+        colours = {
+            "info": theme.ACCENT, "success": theme.LINK_UP,
+            "warning": theme.WARNING, "error": theme.LINK_DOWN,
+        }
         try:
-            for idx, job in enumerate(jobs):
-                if self._stop_event.is_set():
-                    stopped = True
-                    break
-
-                host = job["host"]
-                target = SwitchTarget(host=host, credentials=job["credentials"])
-
-                # A transient VPN/SSH read failure gets one fresh connection.
-                for attempt in range(1, 3):
-                    if self._stop_event.is_set():
-                        stopped = True
-                        break
-                    connection = None
-                    try:
-                        retry = " (retry)" if attempt == 2 else ""
-                        self._msg_queue.put((
-                            "status",
-                            f"Connecting to {host} ({job['vendor']}){retry}…",
-                            theme.ACCENT,
-                        ))
-                        connection = open_session(target, device_type=job["device_type"])
-                        self._msg_queue.put((
-                            "status", f"Collecting data from {host}{retry}…", theme.ACCENT,
-                        ))
-                        raw = job["collector"].collect(
-                            connection, host, self._stop_event.is_set,
-                        )
-                        parsed = job["parser"].parse(raw)
-                        if not parsed.interfaces:
-                            raise ValueError("No interfaces were recognised in the switch output")
-                        results.append(parsed)
-                        up = sum(1 for i in parsed.interfaces if i.link.lower() == "up")
-                        self._msg_queue.put((
-                            "status",
-                            f"✓ {host} — {up}/{len(parsed.interfaces)} ports up",
-                            theme.LINK_UP,
-                        ))
-                        break
-                    except PollCancelled:
-                        stopped = True
-                        break
-                    except ReadTimeout as exc:
-                        if self._stop_event.is_set():
-                            stopped = True
-                            break
-                        if attempt == 1:
-                            self._msg_queue.put((
-                                "status", f"Retrying {host} after a response timeout…", theme.WARNING,
-                            ))
-                            continue
-                        message = self._friendly_poll_error(exc)
-                        errors.append((host, message))
-                        self._msg_queue.put(("status", f"✗ {host} — {message}", theme.LINK_DOWN))
-                        break
-                    except Exception as exc:
-                        message = self._friendly_poll_error(exc)
-                        errors.append((host, message))
-                        self._msg_queue.put(("status", f"✗ {host} — {message}", theme.LINK_DOWN))
-                        break
-                    finally:
-                        if connection is not None:
-                            try:
-                                connection.disconnect()
-                            except Exception:
-                                pass
-
-                self._msg_queue.put(("progress", (idx + 1) / total))
-                if stopped:
-                    break
+            results, errors, stopped, outcomes = run_poll(
+                jobs, self._stop_event, max_workers, open_session,
+                lambda text, level: self._msg_queue.put(("status", text, colours[level])),
+                lambda progress: self._msg_queue.put(("progress", progress)),
+            )
         except Exception as exc:
-            # Last-resort guard: the UI must never remain permanently busy.
-            errors.append(("Poll worker", self._friendly_poll_error(exc)))
-        finally:
-            # Stop can arrive during the final command or its cleanup, after
-            # the last between-command/switch cancellation check.
-            stopped = stopped or self._stop_event.is_set()
-            self._msg_queue.put(("done", results, errors, stopped))
+            results, errors, stopped, outcomes = (
+                [], [("Poll worker", self._friendly_poll_error(exc))],
+                self._stop_event.is_set(), {},
+            )
+        self._msg_queue.put(("done", results, errors, stopped, outcomes))
 
     @staticmethod
     def _friendly_poll_error(exc: Exception) -> str:
-        if isinstance(exc, ReadTimeout):
-            return "Timed out waiting for the switch response"
-        message = next((line.strip() for line in str(exc).splitlines() if line.strip()), "")
-        return message or type(exc).__name__
+        return friendly_poll_error(exc)
 
     def _stop_poll(self) -> None:
         """Request a cooperative stop between CLI commands or switches."""
@@ -425,7 +371,7 @@ class PintLiveApp(ctk.CTk):
                 elif kind == "progress":
                     self._sidebar.set_progress(msg[1])
                 elif kind == "done":
-                    self._on_poll_finished(msg[1], msg[2], msg[3])
+                    self._on_poll_finished(msg[1], msg[2], msg[3], msg[4])
         except queue.Empty:
             pass
         self.after(100, self._drain_message_queue)
@@ -435,35 +381,57 @@ class PintLiveApp(ctk.CTk):
         results: list[ParsedSwitchData],
         errors: list[tuple[str, str]],
         stopped: bool = False,
+        outcomes: dict | None = None,
     ) -> None:
         self._polling = False
+        if outcomes is not None:
+            for row_id, (parsed, error) in outcomes.items():
+                if parsed is not None:
+                    self._results_by_row[row_id] = parsed
+                    self._failed_row_ids.discard(row_id)
+                elif error is not None:
+                    self._failed_row_ids.add(row_id)
+            self._poll_results = [
+                self._results_by_row[row_id] for row_id in self._poll_order
+                if row_id in self._results_by_row
+            ]
+        else:
+            self._poll_results = results
+        self._sidebar.set_failed_switches(self._failed_row_ids)
         self._sidebar.set_busy(False)
-        self._poll_results = results
         self._update_metrics()
 
-        if results:
+        if self._poll_results:
             self._refresh_results()
             self._export_btn.configure(state="normal")
             summary = (
-                f"Stopped — {len(results)} switch(es) completed"
-                if stopped else f"Done — {len(results)} switch(es) polled"
+                f"Stopped: {len(self._poll_results)} switch(es) completed"
+                if stopped else f"Done: {len(self._poll_results)} switch(es) collected"
             )
             if errors:
                 summary += f", {len(errors)} failed"
-            self._sidebar.set_status(summary, theme.WARNING if stopped else theme.LINK_UP)
+            self._sidebar.set_status(
+                summary, theme.WARNING if stopped or errors else theme.LINK_UP,
+            )
         else:
             message = (
-                "Stopped — no switches completed."
-                if stopped else "No data collected — check IPs and credentials."
+                "Stopped: no switches completed."
+                if stopped else "No data collected. Check IPs and credentials."
             )
             self._sidebar.set_status(message, theme.WARNING if stopped else theme.LINK_DOWN)
             self._empty_title.configure(text="Poll stopped" if stopped else "No data collected")
             self._empty_description.configure(text=message)
             self._results_caption.configure(text="No results to export")
+            self._export_btn.configure(state="disabled")
 
         if errors:
             error_text = "\n".join(f"• {host}: {msg}" for host, msg in errors)
-            messagebox.showerror("Polling Errors", f"Some switches failed:\n\n{error_text}")
+            messagebox.showerror(
+                "Polling Errors",
+                f"Some switches failed:\n\n{error_text}\n\n"
+                "Correct their IPs, credentials or vendors, then choose Retry failed. "
+                "Successful results are kept.", parent=self,
+            )
 
     # ── ARP list ───────────────────────────────────────────────────────────
 

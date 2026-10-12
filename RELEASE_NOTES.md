@@ -2,6 +2,16 @@
 
 ---
 
+## Unreleased: bulk entry and polling controls
+
+- Paste a list of IP addresses or hostnames, separated by lines, spaces, tabs, commas or semicolons. Duplicate entries are skipped while existing switch settings are kept.
+- Choose from 1 to 20 simultaneous switch connections. The default remains 1 and Stop preserves completed results.
+- Retry only failed switches after correcting their IPs, credentials, vendor or protocol. Successful results stay available and recovered switches return to their original position in the results and Excel export.
+
+Validation is recorded in `PROJECT_STATE.md`. These changes are not included in the Beta 4 downloads below.
+
+---
+
 ## v0.7.0-beta.4 — Polling and Data Accuracy (Beta)
 
 Released 10 October 2026. Live switch validation is still outstanding; v0.6.1 remains stable.

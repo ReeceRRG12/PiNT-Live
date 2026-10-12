@@ -26,8 +26,10 @@ The sidebar communicates outward through four callbacks set by the caller:
 
 from __future__ import annotations
 
+import re
 from tkinter import messagebox
 import tkinter as tk
+from uuid import uuid4
 
 import customtkinter as ctk
 
@@ -38,12 +40,26 @@ from pint_live.vendors import REGISTRY as VENDORS
 DEFAULT_VENDOR = "Ruckus"
 
 
-def _present_modal(dialog, parent, width: int, height: int, focus=None) -> None:
+def _parse_switch_list(text: str, existing=()) -> list[str]:
+    """Split pasted addresses, preserving IPv6 and the first spelling of each host."""
+    seen = {host.strip().casefold() for host in existing if host.strip()}
+    hosts = []
+    for host in re.split(r"[\s,;]+", text.strip()):
+        if host and host.casefold() not in seen:
+            hosts.append(host)
+            seen.add(host.casefold())
+    return hosts
+
+
+def _present_modal(
+    dialog, parent, width: int, height: int, focus=None, *, submit_on_return: bool = True,
+) -> None:
     """Size and centre a dialog using CTk's own DPI scaling on either platform."""
     dialog.geometry(f"{width}x{height}")
     dialog.transient(parent.winfo_toplevel())
     dialog.bind("<Escape>", lambda event: dialog.destroy())
-    dialog.bind("<Return>", lambda event: dialog._save_and_close())
+    if submit_on_return:
+        dialog.bind("<Return>", lambda event: dialog._save_and_close())
 
     def present() -> None:
         if not dialog.winfo_exists():
@@ -82,6 +98,8 @@ class _SwitchRow(ctk.CTkFrame):
         kwargs.setdefault("fg_color", "transparent")
         super().__init__(master, **kwargs)
 
+        self.row_id: str = uuid4().hex
+        self.failed: bool = False
         self.vendor:   str = DEFAULT_VENDOR
         self.username: str = ""
         self.password: str = ""
@@ -109,11 +127,71 @@ class _SwitchRow(ctk.CTkFrame):
         self._vendor_label.grid(row=1, column=0, sticky="w", padx=3)
 
     def refresh_vendor(self) -> None:
-        self._vendor_label.configure(text=self.vendor)
+        self._vendor_label.configure(
+            text=f"{self.vendor} · Failed" if self.failed else self.vendor,
+            text_color=theme.WARNING if self.failed else theme.TEXT_MUTED,
+        )
+
+    def set_failed(self, failed: bool) -> None:
+        self.failed = failed
+        self.refresh_vendor()
 
     @property
     def ip(self) -> str:
         return self.entry.get().strip()
+
+
+class _PasteSwitchesDialog(ctk.CTkToplevel):
+    """Multiline address entry with an explicit submit action."""
+
+    def __init__(self, master, sidebar: "Sidebar"):
+        super().__init__(master)
+        self._sidebar = sidebar
+        self.title("Paste switch list")
+        self.configure(fg_color=theme.SIDEBAR_BG)
+        self.minsize(420, 340)
+
+        body = ctk.CTkFrame(self, fg_color="transparent")
+        body.pack(fill="both", expand=True, padx=18, pady=14)
+        ctk.CTkLabel(
+            body, text="Paste IP addresses or hostnames", anchor="w",
+            font=theme.font_bold(15), text_color=theme.TEXT_PRIMARY,
+        ).pack(fill="x")
+        ctk.CTkLabel(
+            body, text="Separate with new lines, spaces, commas or semicolons.\n"
+            "Duplicates are skipped. Existing switch settings are kept.",
+            anchor="w", justify="left", font=theme.font_body(12),
+            text_color=theme.TEXT_MUTED,
+        ).pack(fill="x", pady=(4, 10))
+
+        actions = ctk.CTkFrame(body, fg_color="transparent")
+        actions.pack(side="bottom", fill="x", pady=(10, 0))
+        ctk.CTkButton(
+            actions, text="Cancel", width=100, height=34,
+            fg_color=theme.NAV_INACTIVE_BG, hover_color=theme.NAV_ACTIVE_BG,
+            font=theme.font_body(), command=self.destroy,
+        ).pack(side="left")
+        ctk.CTkButton(
+            actions, text="Add switches", width=140, height=34,
+            fg_color=theme.POLL_BTN_BG, hover_color=theme.POLL_BTN_HOVER,
+            font=theme.font_bold(13), command=self._save_and_close,
+        ).pack(side="right")
+        self._text = ctk.CTkTextbox(body, font=theme.font_body(), wrap="none")
+        self._text.pack(fill="both", expand=True)
+        _present_modal(self, master, 540, 420, self._text, submit_on_return=False)
+
+    def _save_and_close(self) -> None:
+        text = self._text.get("1.0", "end")
+        if not _parse_switch_list(text):
+            messagebox.showwarning(
+                "No Switches", "Paste at least one IP address or hostname.", parent=self,
+            )
+            return
+        added = self._sidebar._add_switches_from_text(text)
+        self._sidebar.set_status(
+            f"Added {added} switch{'es' if added != 1 else ''}. Duplicates skipped."
+        )
+        self.destroy()
 
 
 # ── Per-switch config popup ────────────────────────────────────────────────
@@ -472,7 +550,11 @@ class Sidebar(ctk.CTkFrame):
         self.on_arp_clear: callable = lambda: None
         self.on_stop_requested: callable = lambda: None
         self._switch_rows: list[_SwitchRow] = []
+        self._failed_row_ids: set[str] = set()
+        self._busy = False
+        self._submitting = False
         self._protocol = tk.StringVar(value="SSH")
+        self._max_workers = tk.StringVar(value="1")
         self._include_raw_outputs = tk.BooleanVar(value=False)
         self._nav_buttons: dict[str, ctk.CTkButton] = {}
         self.shared_username: str = ""
@@ -490,11 +572,30 @@ class Sidebar(ctk.CTkFrame):
         return self._include_raw_outputs.get()
 
     def set_busy(self, busy: bool) -> None:
+        self._busy = busy
         self._poll_btn.configure(
             state="disabled" if busy else "normal",
             text="Polling…" if busy else "Poll switches",
         )
         self._stop_btn.configure(state="normal" if busy else "disabled", text="Stop")
+        self._refresh_retry_status()
+
+    def set_failed_switches(self, row_ids: set[str]) -> None:
+        """Mark failed rows by identity, including duplicate host entries separately."""
+        self._failed_row_ids = set(row_ids) & {row.row_id for row in self._switch_rows}
+        for row in self._switch_rows:
+            row.set_failed(row.row_id in self._failed_row_ids)
+        self._refresh_retry_status()
+
+    def _retry_rows(self) -> list[_SwitchRow]:
+        return [row for row in self._switch_rows if row.row_id in self._failed_row_ids and row.ip]
+
+    def _refresh_retry_status(self) -> None:
+        count = len(self._retry_rows())
+        self._retry_btn.configure(
+            text=f"Retry failed ({count})",
+            state="normal" if count and not self._busy else "disabled",
+        )
 
     def set_stop_requested(self) -> None:
         self._stop_btn.configure(state="disabled", text="Stopping…")
@@ -540,6 +641,7 @@ class Sidebar(ctk.CTkFrame):
         self._add_switch_ip_section()
         self._add_credentials_section()
         self._add_protocol_section()
+        self._add_polling_section()
         self._add_arp_section()
         self._add_export_options_section()
 
@@ -574,6 +676,11 @@ class Sidebar(ctk.CTkFrame):
             font=theme.font_body(), fg_color=theme.NAV_INACTIVE_BG,
             hover_color=theme.NAV_ACTIVE_BG, command=self._add_switch_row,
         ).pack(fill="x", padx=8, pady=(6, 0))
+        ctk.CTkButton(
+            self._settings, text="Paste list…", height=32,
+            font=theme.font_body(), fg_color=theme.NAV_INACTIVE_BG,
+            hover_color=theme.NAV_ACTIVE_BG, command=self._open_paste_switches,
+        ).pack(fill="x", padx=8, pady=(6, 0))
 
     def _add_credentials_section(self) -> None:
         self._section("2   Set credentials & vendors")
@@ -583,6 +690,7 @@ class Sidebar(ctk.CTkFrame):
             hover_color=theme.VENDOR_HOVER, command=self._open_bulk_config,
         ).pack(fill="x", padx=8)
         self._credentials_label = self._hint("Add a username and password to connect.")
+        self._hint("After a failure, correct credentials or edit the switch, then choose Retry failed.")
 
     def _refresh_credentials_status(self) -> None:
         if self.use_shared_creds:
@@ -633,6 +741,22 @@ class Sidebar(ctk.CTkFrame):
         )
         self._arp_label = self._hint("No ARP lists loaded.")
 
+    def _add_polling_section(self) -> None:
+        self._section("4   Set polling concurrency")
+        row = ctk.CTkFrame(self._settings, fg_color="transparent")
+        row.pack(fill="x", padx=8)
+        ctk.CTkLabel(
+            row, text="Switches at once", anchor="w", font=theme.font_body(),
+            text_color=theme.TEXT_MUTED,
+        ).pack(side="left", fill="x", expand=True)
+        ctk.CTkOptionMenu(
+            row, values=[str(value) for value in range(1, 21)],
+            variable=self._max_workers, width=80, height=32,
+            fg_color=theme.VENDOR_INACTIVE_BG, button_color=theme.VENDOR_ACTIVE_BG,
+            button_hover_color=theme.VENDOR_HOVER, font=theme.font_body(),
+        ).pack(side="right")
+        self._hint("Connect to 1–20 switches concurrently. Default: 1.")
+
     def _add_export_options_section(self) -> None:
         self._section("Excel export")
         self._raw_output_checkbox = ctk.CTkCheckBox(
@@ -669,6 +793,13 @@ class Sidebar(ctk.CTkFrame):
             command=lambda: self.on_stop_requested(),
         )
         self._stop_btn.pack(side="left")
+        self._retry_btn = ctk.CTkButton(
+            self._controls, text="Retry failed (0)", height=34,
+            font=theme.font_bold(13), fg_color=theme.NAV_INACTIVE_BG,
+            hover_color=theme.NAV_ACTIVE_BG, state="disabled",
+            command=self._on_retry_click,
+        )
+        self._retry_btn.pack(fill="x", pady=(8, 0))
 
     def _add_status_area(self) -> None:
         self._progress_bar = ctk.CTkProgressBar(
@@ -699,7 +830,7 @@ class Sidebar(ctk.CTkFrame):
 
     # ── Switch IP row management ───────────────────────────────────────────
 
-    def _add_switch_row(self) -> None:
+    def _add_switch_row(self) -> _SwitchRow:
         # Use a holder list so the callbacks can reference `row` before
         # the variable is bound — avoids reconfiguring after creation.
         holder: list[_SwitchRow] = []
@@ -711,16 +842,38 @@ class Sidebar(ctk.CTkFrame):
         holder.append(row)
         row.pack(anchor="w", pady=2, fill="x")
         self._switch_rows.append(row)
-        row.entry.bind("<KeyRelease>", lambda event: self._refresh_credentials_status(), add="+")
+        row.entry.bind("<KeyRelease>", lambda event: self._on_switch_edited(), add="+")
         row.entry.focus_set()
         self._refresh_credentials_status()
+        return row
+
+    def _on_switch_edited(self) -> None:
+        self._refresh_credentials_status()
+        self._refresh_retry_status()
+
+    def _add_switches_from_text(self, text: str) -> int:
+        hosts = _parse_switch_list(text, (row.ip for row in self._switch_rows))
+        empty_rows = iter([row for row in self._switch_rows if not row.ip])
+        for host in hosts:
+            row = next(empty_rows, None)
+            if row is None:
+                row = self._add_switch_row()
+            else:
+                # Filling an empty row adds a new target, even if it failed earlier.
+                self._failed_row_ids.discard(row.row_id)
+                row.row_id = uuid4().hex
+                row.set_failed(False)
+            row.entry.insert(0, host)
+        self._on_switch_edited()
+        return len(hosts)
 
     def _remove_switch_row(self, row: _SwitchRow) -> None:
         if len(self._switch_rows) <= 1:
             return   # always keep at least one row
         self._switch_rows.remove(row)
+        self._failed_row_ids.discard(row.row_id)
         row.destroy()
-        self._refresh_credentials_status()
+        self._on_switch_edited()
 
     # ── Modal launchers ────────────────────────────────────────────────────
 
@@ -730,6 +883,9 @@ class Sidebar(ctk.CTkFrame):
 
     def _open_bulk_config(self) -> None:
         _BulkConfigDialog(self, self)
+
+    def _open_paste_switches(self) -> None:
+        _PasteSwitchesDialog(self, self)
 
     # ── Protocol selection ─────────────────────────────────────────────────
 
@@ -758,7 +914,31 @@ class Sidebar(ctk.CTkFrame):
     # ── Poll trigger ───────────────────────────────────────────────────────
 
     def _on_poll_click(self) -> None:
-        rows_with_ip = [r for r in self._switch_rows if r.ip]
+        self._request_poll(retry_failed=False)
+
+    def _on_retry_click(self) -> None:
+        self._request_poll(retry_failed=True)
+
+    def _request_poll(self, *, retry_failed: bool) -> None:
+        if self._busy or self._submitting:
+            return
+        self._submitting = True
+        try:
+            rows = self._retry_rows() if retry_failed else [r for r in self._switch_rows if r.ip]
+            if retry_failed and not rows:
+                return
+            config = self._poll_config(rows, retry_failed=retry_failed)
+            if config is not None:
+                self.set_busy(True)
+                try:
+                    self.on_poll_requested(config)
+                except Exception:
+                    self.set_busy(False)
+                    raise
+        finally:
+            self._submitting = False
+
+    def _poll_config(self, rows_with_ip: list[_SwitchRow], *, retry_failed: bool) -> dict | None:
         if not rows_with_ip:
             messagebox.showwarning(
                 "No Switches",
@@ -767,14 +947,13 @@ class Sidebar(ctk.CTkFrame):
             )
             return
 
-        # Duplicate IPs would double-poll and produce duplicate sheets
-        # in the Excel export — flag it, but let the user override.
+        # A retry already refers to specific failed rows from an approved poll.
         seen: dict[str, int] = {}
         for r in rows_with_ip:
-            key = r.ip.lower()
+            key = r.ip.casefold()
             seen[key] = seen.get(key, 0) + 1
         duplicates = sorted(ip for ip, count in seen.items() if count > 1)
-        if duplicates:
+        if duplicates and not retry_failed:
             proceed = messagebox.askyesno(
                 "Duplicate Switches",
                 "The following IP/host appears more than once:\n\n"
@@ -802,6 +981,7 @@ class Sidebar(ctk.CTkFrame):
                 missing_creds.append(row.ip)
 
             switches.append({
+                "row_id":   row.row_id,
                 "host":     row.ip,
                 "vendor":   row.vendor,
                 "username": user,
@@ -818,11 +998,12 @@ class Sidebar(ctk.CTkFrame):
             )
             return
 
-        config = {
+        return {
             "protocol":         self._protocol.get(),
+            "max_workers":      int(self._max_workers.get()),
+            "retry_failed":     retry_failed,
             "use_shared_creds": self.use_shared_creds,
             "shared_username":  self.shared_username,
             "shared_password":  self.shared_password,
             "switches":         switches,
         }
-        self.on_poll_requested(config)

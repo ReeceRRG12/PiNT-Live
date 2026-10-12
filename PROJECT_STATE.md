@@ -3,15 +3,29 @@
 ## Brief
 
 - **Purpose:** turn live, mixed-vendor switch data into accurate, shareable network documentation.
-- **Current deliverable:** publish the verified bug fixes on `main` as `v0.7.0-beta.4` (`0.7.0b4`), with Windows x64 EXE and Apple Silicon/Intel macOS DMGs.
-- **Success:** fixes and version committed to `main`; local tests pass; all native release jobs and frozen startup checks pass; published download checksums verified.
-- **Constraints:** preserve the current desktop workflow and vendor support. Credentials stay in memory; raw configuration export remains opt-in. Live hardware validation must be distinguished from simulated checks.
-- **Non-goals:** scheduled/headless polling, desired-state configuration changes, and promoting this beta to stable without live hardware validation.
-- **Stages:** correctness fixes → version/local checks → main/tag push → native builds/release verification: **complete**.
-- **Finish condition:** beta 4 published with verified native downloads and saved checkpoint. Stable promotion remains outside scope.
-- **Current next action:** live-switch and interactive Windows/high-DPI validation before considering stable promotion.
+- **Current deliverable:** bulk IP/hostname entry, configurable polling of 1 to 20 switches at once, and retries of failed switches using corrected settings without losing successful results.
+- **Success:** latest GitHub code checked; scoped implementation and regression tests pass; desktop flow checked with simulated switches; outcome recorded.
+- **Constraints:** preserve desktop workflow, vendor support, input order and reliable Stop/session cleanup. Credentials stay in memory; raw configuration export remains opt-in. Distinguish simulated checks from live hardware validation.
+- **Non-goals:** scheduled/headless polling, desired-state changes, dependency upgrades, and publishing a new release in this request.
+- **Stages:** latest-code review, implementation, automated verification and offline desktop workflow checks complete.
+- **Current next action:** use the updated source for live-switch validation; if a release is requested, select the next beta version and run the existing native packaging workflow.
 
-## Active checkpoint — bug-fix release, 10 October 2026
+## Active checkpoint: bulk polling and retries, 12 October 2026
+
+- User requested pulling the latest GitHub code, reviewing it and implementing bulk address paste, 1 to 20 simultaneous polls and failed-only retries after correcting credentials.
+- Clean `main` pulled with `git pull --ff-only`: already current at `4f9c81fd615f556ac11260cd35d706134f567140`. Work is on `codex/bulk-poll-retry`.
+- Baseline: all 53 tests passed using the existing temporary Python environment documented below.
+- Design: default concurrency remains 1; each switch row has a stable identity so retries also handle duplicate hosts safely. Retry reads current IP/vendor/protocol/credentials and preserves earlier successes and original result order. Cancelled/unstarted switches are not labelled failures.
+- Implemented bulk paste with duplicate filtering and preserved settings; a session-level 1 to 20 concurrency selector; visible failed rows and a persistent Retry failed control. The default remains 1. Settings are read afresh for each retry and sessions use independent daemon workers with cooperative Stop.
+- Independent final review found and fixed stale failure identity when a paste reused a cleared row. New pasted targets receive new identities, preventing previous failures from making them retry candidates.
+- Verification: **81 tests passed** (53 existing plus 28 new), covering concurrency 1/2/20, ordered results, cleanup, Stop/timeout behaviour, corrected credentials, duplicate hosts, removed/reused rows, retained results and export data. `compileall`, `pip check` and `git diff --check` passed.
+- macOS ARM64 source startup passed with no callback errors. Offline desktop workflow passed at 980×620: pasted/deduplicated addresses, simulated an authentication failure, corrected its credentials, retried only that switch and exported all three switches in original order. Run/export controls were verified in the window bounds. Screenshot inspection was unavailable because the computer-use app lookup timed out.
+- Reproducible desktop check script and JSON reports are saved under ignored `build/qa-bulk-polling/`. The existing temporary interpreter remains `/var/folders/_4/3qdmz6ps78v9hs0l7qf6jy180000gn/T/pint-review-20261010-3e3zoic8/venv/bin/python`; set `PYTHONPATH=.` when running scripts outside the package root.
+- Delivery is local on `codex/bulk-poll-retry`; no GitHub push, release or native binary rebuild performed. Source documentation marks these features unreleased. No live hardware contacted; Windows interactive validation remains outstanding.
+- Native usage at completion: visible weekly window has 92% remaining; no second active window was exposed. No model change or reset consumed.
+- **Current stage: requested source changes complete.** Next action is live-switch validation of the source, or a separately requested beta release using the existing native build workflow.
+
+## Checkpoint — bug-fix release, 10 October 2026
 
 - User explicitly authorized fixing the review findings, pushing to `main` as a new version, and publishing the release. The fixes are already implemented; release target is `v0.7.0-beta.4`, package/app version `0.7.0b4`.
 - Remote recheck confirmed `origin/main` at `0f82fb6` and no beta 4 tag/release. Preserve beta classification and existing stable branches; live-switch validation remains outstanding.

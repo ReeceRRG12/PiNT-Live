@@ -47,10 +47,15 @@ These beta builds are not publisher-signed or Apple-notarized. Windows SmartScre
 
 ### Getting started
 
-1. Add your switch IPs or hostnames. Use **Edit** to choose a vendor for an individual switch.
-2. Open **Credentials & vendors…** to set shared credentials or per-switch overrides.
-3. Keep **SSH** selected, optionally load ARP workbooks, and click **Poll switches**.
-4. Search or filter the results, then **Export to Excel**. The workbook includes all collected results regardless of the visible filter.
+The following workflow describes the current source version. Bulk entry, simultaneous polling and failed-only retries are unreleased and are not included in the Beta 4 downloads above.
+
+1. Add your switch IPs or hostnames individually, or use **Paste list…** to add a whole list. Lines, spaces, tabs, commas and semicolons separate entries; duplicates are skipped.
+2. Open **Credentials & vendors…** to set shared credentials or per-switch overrides. Use **Edit** to configure an individual switch.
+3. Keep **SSH** selected and set **Switches at once** to **1–20** (default **1**). Optionally load ARP workbooks, then click **Poll switches**.
+4. If some switches fail, correct their IPs, credentials or vendor settings and click **Retry failed**. For different credentials on individual switches, untick **Use same credentials for all** in **Credentials & vendors…** first. Retry uses the current settings and keeps successful results.
+5. Search or filter the results, then **Export to Excel**. The workbook includes all collected results regardless of the visible filter.
+
+**Poll switches** starts a fresh run. **Retry failed** only retries failed rows still in the list; newly added rows and switches cancelled or not started by Stop are not included. The concurrency setting applies to the next run or retry and lasts for the current app session.
 
 **⌘F / Ctrl+F** focuses search; **⌘E / Ctrl+E** starts export when results are available. Poll and Stop stay visible while the setup panel scrolls.
 
