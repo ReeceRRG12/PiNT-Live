@@ -7,8 +7,8 @@
 - **Success:** source/version pushed; all 81 tests and native builds/startup checks pass; beta published with all three downloads and verified checksums.
 - **Constraints:** retain beta classification for this release and preserve existing release metadata. Credentials stay in memory. Distinguish simulated checks from live hardware validation.
 - **Non-goals:** stable promotion, scheduled polling, desired-state changes and dependency upgrades.
-- **Stages:** release preflight and local tests complete; version/tag push next; native build and download verification follow.
-- **Current next action:** commit version/docs, fast-forward `main`, push `main` and new tag atomically, then follow the native workflow through publication and verification.
+- **Stages:** release preflight, main/tag push, native builds, publication and download verification complete.
+- **Current next action:** live-switch and interactive Windows/high-DPI validation before any stable-promotion decision.
 
 ## Active checkpoint: beta 5 release, 13 October 2026
 
@@ -18,7 +18,19 @@
 - Current GitHub metadata differs from the historical beta 4 checkpoint: beta 4 is now non-prerelease and Latest. Preserve that metadata; beta 5 must explicitly remain prerelease with `latest=false`.
 - Native usage preflight: visible weekly window has 98% remaining, no second active window exposed. No model change or reset consumed.
 - Release candidate versions agree at `0.7.0b5`; macOS ARM64 source startup passed with no callback errors.
-- **Current stage: ready to push.** Next action: push main/tag, then verify build and publication. No live hardware contacted by Codex.
+- Fast-forwarded `main` and pushed it atomically with annotated tag `v0.7.0-beta.5` at `43a85bfe6f77e9e57b17ce8a338b605b4c53fb9e`.
+- [Native release run 38366264755](https://github.com/ReeceRRG12/PiNT-Live/actions/runs/38366264755) is building the three packages from the tagged commit.
+- Initial native run: Windows and Intel macOS passed. Apple Silicon passed tests, architecture and frozen startup (`0.7.0b5`) but DMG verification reported `Resource temporarily unavailable` immediately after image creation. Publication was correctly skipped. Reran failed jobs with `gh run rerun 38366264755 --failed`; full verification remains required and the tag is unchanged.
+- [Native release run 38366264755](https://github.com/ReeceRRG12/PiNT-Live/actions/runs/38366264755) completed successfully on attempt 2. Apple Silicon rerun passed, followed by the publication job; the already successful Windows/Intel jobs were retained. All three platforms passed the 81 tests, native packaging, architecture and frozen-startup checks.
+- Published [PiNT Live v0.7.0 Beta 5: Bulk Polling and Retries](https://github.com/ReeceRRG12/PiNT-Live/releases/tag/v0.7.0-beta.5) as a prerelease with three native downloads and three checksum files. Existing beta 4 remains Latest; no older release classification was changed.
+- Download verification: each binary matches its published SHA-256 file, GitHub asset digest and size; Windows is x64 PE, both DMGs passed local `hdiutil verify`, and all three downloaded startup reports confirm `ok: true`, correct architecture and version `0.7.0b5` with no callback errors. Evidence and downloads are saved under ignored `dist/release/v0.7.0-beta.5/`.
+- Verified Windows-x64 SHA-256: `88b1183a3b0e695959d396dd02a275dac10d0c594a0987e91d7f1b0fa760414f`.
+- Verified macOS-Apple-Silicon SHA-256: `cf0e06fa6a3ea9d45f5dca8d5b64c227bbeb83eb3129ce0cab48ec84595c9260`.
+- Verified macOS-Intel SHA-256: `f5496d3aba95705e8f65814191dabd5a397ba6ab9469a78ea08ba345e2742773`.
+- User's source-app approval is recorded above; Codex did not contact live switches. Live-switch validation and interactive Windows/high-DPI checks remain outstanding. Builds remain unsigned/not notarised.
+- Final visible weekly allowance: 92% remaining; no model change or reset consumed.
+- **Current stage: requested beta release complete.** Next action: supported-switch and interactive Windows validation before considering stable promotion.
+
 
 ## Checkpoint: bulk polling and retries, 12 October 2026
 
