@@ -2,13 +2,15 @@
 
 ---
 
-## Unreleased: bulk entry and polling controls
+## v0.7.0-beta.5: Bulk Polling and Retries (Beta)
+
+Prepared 13 October 2026.
 
 - Paste a list of IP addresses or hostnames, separated by lines, spaces, tabs, commas or semicolons. Duplicate entries are skipped while existing switch settings are kept.
 - Choose from 1 to 20 simultaneous switch connections. The default remains 1 and Stop preserves completed results.
 - Retry only failed switches after correcting their IPs, credentials, vendor or protocol. Successful results stay available and recovered switches return to their original position in the results and Excel export.
 
-Validation is recorded in `PROJECT_STATE.md`. These changes are not included in the Beta 4 downloads below.
+Validation: all 81 local automated tests and the offline macOS desktop workflow passed. Native build and frozen-app checks are pending. Live switch and interactive Windows validation remain outstanding. Builds remain unsigned and not Apple-notarised.
 
 ---
 

@@ -3,14 +3,24 @@
 ## Brief
 
 - **Purpose:** turn live, mixed-vendor switch data into accurate, shareable network documentation.
-- **Current deliverable:** bulk IP/hostname entry, configurable polling of 1 to 20 switches at once, and retries of failed switches using corrected settings without losing successful results.
-- **Success:** latest GitHub code checked; scoped implementation and regression tests pass; desktop flow checked with simulated switches; outcome recorded.
-- **Constraints:** preserve desktop workflow, vendor support, input order and reliable Stop/session cleanup. Credentials stay in memory; raw configuration export remains opt-in. Distinguish simulated checks from live hardware validation.
-- **Non-goals:** scheduled/headless polling, desired-state changes, dependency upgrades, and publishing a new release in this request.
-- **Stages:** latest-code review, implementation, automated verification and offline desktop workflow checks complete.
-- **Current next action:** use the updated source for live-switch validation; if a release is requested, select the next beta version and run the existing native packaging workflow.
+- **Current deliverable:** publish the approved bulk-entry, concurrency and retry changes on `main` as `v0.7.0-beta.5` (`0.7.0b5`), with Windows x64 EXE and Apple Silicon/Intel macOS DMGs.
+- **Success:** source/version pushed; all 81 tests and native builds/startup checks pass; beta published with all three downloads and verified checksums.
+- **Constraints:** retain beta classification for this release and preserve existing release metadata. Credentials stay in memory. Distinguish simulated checks from live hardware validation.
+- **Non-goals:** stable promotion, scheduled polling, desired-state changes and dependency upgrades.
+- **Stages:** release preflight and local tests complete; version/tag push next; native build and download verification follow.
+- **Current next action:** commit version/docs, fast-forward `main`, push `main` and new tag atomically, then follow the native workflow through publication and verification.
 
-## Active checkpoint: bulk polling and retries, 12 October 2026
+## Active checkpoint: beta 5 release, 13 October 2026
+
+- User tested the source, said it looks good and explicitly requested pushing to GitHub and publishing a new beta with Windows EXE and Mac DMGs.
+- Clean feature commit `732f577` is based on current `origin/main` (`4f9c81fd615f556ac11260cd35d706134f567140`). Fresh fetch confirmed no newer main or beta 5 tag. Release target is `v0.7.0-beta.5` / `0.7.0b5`.
+- All **81 local tests passed** again. Independent preflight found no packaging blocker; the existing workflow builds all three native targets and gates publication on their tests, frozen startup, architecture and checksum checks.
+- Current GitHub metadata differs from the historical beta 4 checkpoint: beta 4 is now non-prerelease and Latest. Preserve that metadata; beta 5 must explicitly remain prerelease with `latest=false`.
+- Native usage preflight: visible weekly window has 98% remaining, no second active window exposed. No model change or reset consumed.
+- Release candidate versions agree at `0.7.0b5`; macOS ARM64 source startup passed with no callback errors.
+- **Current stage: ready to push.** Next action: push main/tag, then verify build and publication. No live hardware contacted by Codex.
+
+## Checkpoint: bulk polling and retries, 12 October 2026
 
 - User requested pulling the latest GitHub code, reviewing it and implementing bulk address paste, 1 to 20 simultaneous polls and failed-only retries after correcting credentials.
 - Clean `main` pulled with `git pull --ff-only`: already current at `4f9c81fd615f556ac11260cd35d706134f567140`. Work is on `codex/bulk-poll-retry`.
